@@ -1,5 +1,12 @@
 # PlayerSkins
 
+[![Release](https://img.shields.io/github/v/release/ANXSFAN/PlayerSkins?display_name=tag&sort=semver)](https://github.com/ANXSFAN/PlayerSkins/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ANXSFAN/PlayerSkins/total)](https://github.com/ANXSFAN/PlayerSkins/releases)
+[![License](https://img.shields.io/github/license/ANXSFAN/PlayerSkins)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/ANXSFAN/PlayerSkins?style=flat)](https://github.com/ANXSFAN/PlayerSkins/stargazers)
+[![CounterStrikeSharp](https://img.shields.io/badge/CounterStrikeSharp-1.0.371-blue)](https://github.com/roflmuffin/CounterStrikeSharp)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
+
 给 **真人玩家** 上武器 / 刀 / 手套皮肤的 CounterStrikeSharp 插件，用于 **`-insecure` 离线打人机自用**。
 
 配合 [CS2-Bot-Improver](https://github.com/ed0ard/CS2-Bot-Improver) 使用：它的 `BotRandomizer` 只给 **bot** 上皮肤，本插件只给 **真人**（`!IsBot`）上皮肤，两者互不冲突。
