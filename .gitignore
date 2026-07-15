@@ -1,0 +1,17 @@
+# build output
+bin/
+obj/
+
+# 发布包不入库，作为 GitHub Release 附件上传
+dist/
+
+# 用户运行时生成的个人配置（不入库）
+config.json
+**/config.json
+
+# IDE / OS
+.vs/
+.idea/
+*.user
+Thumbs.db
+.DS_Store

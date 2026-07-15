@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyName>PlayerSkins</AssemblyName>
+    <RootNamespace>PlayerSkins</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <!-- CounterStrikeSharp API：从 NuGet 还原。版本需与你服务器上的 CSSharp 对应。
+       本插件在 CounterStrikeSharp 1.0.371 (CS2-Bot-Improver v1.4.2) 上测试通过。 -->
+  <ItemGroup>
+    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.371" />
+  </ItemGroup>
+
+  <!-- 皮肤数据文件：编译时自动拷到输出目录，随 dll 一起分发 -->
+  <ItemGroup>
+    <Content Include="..\data\skins_en.json" Link="skins_en.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\data\skins_db.json" Link="skins_db.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
