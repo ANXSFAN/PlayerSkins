@@ -17,7 +17,7 @@ namespace PlayerSkins;
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.1.1";
+    public override string ModuleVersion => "1.1.2";
     public override string ModuleAuthor => "ANXSFAN";
     public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用）";
 
@@ -130,8 +130,17 @@ public class PlayerSkinsPlugin : BasePlugin
             if (!IsRealPlayer(player)) return HookResult.Continue;
 
             var w = weapon;
-            ApplyToWeapon(w);
-            Server.NextFrame(() => { if (w.IsValid) ApplyToWeapon(w); });
+            // 关键：刀必须在创建这一刻就换 subclass，客户端才会用正确刀模型构建（否则显示默认刀）
+            if (designer.Contains("knife") || designer == "weapon_bayonet")
+            {
+                ApplyKnifeToWeapon(w, _cfg.KnifeDef, _cfg.Knife);
+                Server.NextFrame(() => { if (w.IsValid) ApplyKnifeToWeapon(w, _cfg.KnifeDef, _cfg.Knife); });
+            }
+            else
+            {
+                ApplyToWeapon(w);
+                Server.NextFrame(() => { if (w.IsValid) ApplyToWeapon(w); });
+            }
         }
         catch (Exception ex)
         {
@@ -245,33 +254,42 @@ public class PlayerSkinsPlugin : BasePlugin
         }
     }
 
-    private void ApplyKnife(CCSPlayerPawn pawn, ushort defIndex, Loadout lo)
+    // 在指定刀实体上换 subclass + 上皮肤（供创建钩子与 ApplyAll 共用）
+    private void ApplyKnifeToWeapon(CBasePlayerWeapon? w, ushort defIndex, Loadout lo)
     {
+        if (_setAttrByName == null || w == null || !w.IsValid) return;
         if (DefaultKnives.Contains(defIndex)) return;  // 默认刀不换模型，防止客户端崩溃
+        var designer = w.DesignerName;
+        if (string.IsNullOrEmpty(designer) || (!designer.Contains("knife") && designer != "weapon_bayonet")) return;
         try
         {
-            var ws = pawn.WeaponServices;
-            if (ws == null) return;
-            foreach (var h in ws.MyWeapons)
+            w.AcceptInput("ChangeSubclass", null, null, defIndex.ToString());
+            var item = w.AttributeManager?.Item;
+            if (item != null)
             {
-                var w = h.Value;
-                if (w == null || !w.IsValid) continue;
-                var designer = w.DesignerName;
-                if (string.IsNullOrEmpty(designer) || (!designer.Contains("knife") && designer != "weapon_bayonet")) continue;
-
-                w.AcceptInput("ChangeSubclass", null, null, defIndex.ToString());
-                var item = w.AttributeManager?.Item;
-                if (item != null)
-                {
-                    item.ItemDefinitionIndex = defIndex;
-                    ApplyLoadout(w, defIndex, lo, isKnife: true);
-                }
-                break;
+                item.ItemDefinitionIndex = defIndex;
+                ApplyLoadout(w, defIndex, lo, isKnife: true);
             }
         }
         catch (Exception ex)
         {
-            Logger.LogError("[PlayerSkins] ApplyKnife 失败: " + ex.Message);
+            Logger.LogError("[PlayerSkins] ApplyKnifeToWeapon 失败: " + ex.Message);
+        }
+    }
+
+    private void ApplyKnife(CCSPlayerPawn pawn, ushort defIndex, Loadout lo)
+    {
+        if (DefaultKnives.Contains(defIndex)) return;
+        var ws = pawn.WeaponServices;
+        if (ws == null) return;
+        foreach (var h in ws.MyWeapons)
+        {
+            var w = h.Value;
+            if (w == null || !w.IsValid) continue;
+            var designer = w.DesignerName;
+            if (string.IsNullOrEmpty(designer) || (!designer.Contains("knife") && designer != "weapon_bayonet")) continue;
+            ApplyKnifeToWeapon(w, defIndex, lo);
+            break;
         }
     }
 
