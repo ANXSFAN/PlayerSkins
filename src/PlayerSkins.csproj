@@ -22,6 +22,7 @@
   <ItemGroup>
     <Content Include="..\data\skins_en.json" Link="skins_en.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\data\skins_db.json" Link="skins_db.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\data\stickers_db.json" Link="stickers_db.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

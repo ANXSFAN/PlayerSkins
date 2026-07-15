@@ -43,13 +43,14 @@
    plugins\PlayerSkins\
      ├─ PlayerSkins.dll
      ├─ PlayerSkins.deps.json
-     ├─ skins_en.json      (legacy 老模型皮肤位置判断)
-     └─ skins_db.json      (!skinsearch 皮肤名称库)
+     ├─ skins_en.json       (legacy 老模型皮肤位置判断)
+     ├─ skins_db.json       (!skinsearch 皮肤名称库)
+     └─ stickers_db.json    (!stickersearch 贴纸名称库)
    ```
-3. **重启游戏 / 重开一局**，插件会自动加载（CounterStrikeSharp 默认开启自动加载）。
-   进局后拿把枪打 `!skin 180` 有反应，就说明装好了。
-
-> 装插件不需要任何管理指令，重启即可。（`css_plugins` 等指令需要 root 管理员权限，普通房主默认没有，不用去碰。）
+3. 启动打人机（开图自动加载），或在服务器控制台执行：
+   ```
+   css_plugins reload PlayerSkins
+   ```
 
 ---
 
@@ -57,16 +58,41 @@
 
 聊天框输入 `!`，或服务器控制台输入 `css_`。
 
+所有指令都作用于 **当前手持的武器**（`!knife` / `!gloves` 除外）。
+
+### 基础
 | 指令 | 说明 | 例子 |
 |---|---|---|
-| `!skin <代号>` | 给 **当前手持** 的武器上皮肤 | 拿着 AK 输 `!skin 180` |
+| `!skin <代号>` | 手持武器上皮肤 | 拿着 AK 输 `!skin 180` |
 | `!knife <刀名\|defindex> [代号]` | 换刀（模型 + 皮肤） | `!knife karambit 415` |
 | `!gloves <defindex> <代号>` | 换手套 | `!gloves 5030 10048` |
-| `!skinsearch <关键词>` / `!ss` | 按中英文名搜皮肤代号 | `!ss 龙` / `!ss awp dragon` |
 | `!reskin` | 立即重新应用全部已保存皮肤 | |
 | `!clearskins` | 清空全部皮肤设置 | |
 
-- 选择会自动保存到插件目录的 `config.json`，**重启游戏后仍生效**。
+### 进阶（图案 / 磨损 / StatTrak / 品质）
+| 指令 | 说明 | 例子 |
+|---|---|---|
+| `!seed <值>` | 图案种子（决定花色，如淬火蓝宝石、渐变%、大理石花纹） | 淬火蓝宝石：`!skin 44` → `!seed 661` |
+| `!wear <0-1>` | 磨损（0=崭新，1=战痕） | `!wear 0.0001` |
+| `!stattrak <数\|off>` / `!st` | StatTrak 金色计数器 | `!stattrak 1337` / `!st off` |
+| `!quality <normal\|stattrak\|souvenir\|star>` | 物品品质（`souvenir`=纪念品金铭牌，如纪念品龙狙） | 拿 AWP `!skin 344` → `!quality souvenir` |
+
+### 贴纸
+| 指令 | 说明 | 例子 |
+|---|---|---|
+| `!sticker <槽0-4> <id\|clear> [磨损] [缩放] [旋转]` | 往 4 个槽位贴/撕贴纸 | `!sticker 0 76`（Titan 全息卡托2014） |
+| `!stickerclear` / `!sc` | 清空手持武器全部贴纸 | |
+| `!stickersearch <关键词>` / `!sss` | 搜贴纸代号（1万+张，中英文） | `!sss 皇冠` / `!sss katowice 2014` |
+
+> ⚠️ **贴纸的显示时机**：贴纸只在武器模型「完整重建」时才渲染，因此 `!sticker` 后需要 **重进地图**（`map de_dust2` 等，或换图）才会显示——普通重生不刷新。皮肤 / 种子 / StatTrak / 品质这些则重生即生效。
+
+### 搜索
+| 指令 | 说明 | 例子 |
+|---|---|---|
+| `!skinsearch <关键词>` / `!ss` | 搜皮肤代号（中英文） | `!ss 龙` / `!ss awp dragon` |
+| `!stickersearch <关键词>` / `!sss` | 搜贴纸代号 | `!sss titan` |
+
+- 所有选择自动保存到插件目录 `config.json`，**重启游戏后仍生效**。
 - 刀名支持：`karambit` `butterfly` `m9` `bayonet` `flip` `talon` `stiletto` `ursus` `skeleton` `kukri` 等。
 - 手套 defindex：`5027`(血猎) `5030`(运动) `5031`(驾驶) `5032`(缠绕) `5033`(摩托) `5034`(专业) `5035`(九头蛇) `4725`(狂牙)。
 
@@ -102,7 +128,8 @@ dotnet build -c Release
 ## 致谢
 
 - 写皮肤的底层实现思路参考自 [ed0ard/CS2-Bot-Improver](https://github.com/ed0ard/CS2-Bot-Improver) 的 `BotRandomizer`。
-- 皮肤名称 / paint_index 数据来自 [ByMykel/CSGO-API](https://github.com/ByMykel/CSGO-API)。
+- 贴纸 / StatTrak 的属性写法（`ViewAsFloat` 位重解释、`sticker slot N ...` 属性）参考自 [Nereziel/cs2-WeaponPaints](https://github.com/Nereziel/cs2-WeaponPaints)。
+- 皮肤 / 贴纸名称与 paint_index 数据来自 [ByMykel/CSGO-API](https://github.com/ByMykel/CSGO-API)。
 - 基于 [roflmuffin/CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) 开发。
 
 ## 许可证
