@@ -46,10 +46,10 @@
      ├─ skins_en.json      (legacy 老模型皮肤位置判断)
      └─ skins_db.json      (!skinsearch 皮肤名称库)
    ```
-3. 启动打人机（开图自动加载），或在服务器控制台执行：
-   ```
-   css_plugins reload PlayerSkins
-   ```
+3. **重启游戏 / 重开一局**，插件会自动加载（CounterStrikeSharp 默认开启自动加载）。
+   进局后拿把枪打 `!skin 180` 有反应，就说明装好了。
+
+> 装插件不需要任何管理指令，重启即可。（`css_plugins` 等指令需要 root 管理员权限，普通房主默认没有，不用去碰。）
 
 ---
 
