@@ -17,7 +17,7 @@ namespace PlayerSkins;
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.1.0";
+    public override string ModuleVersion => "1.1.1";
     public override string ModuleAuthor => "ANXSFAN";
     public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用）";
 
@@ -34,6 +34,10 @@ public class PlayerSkinsPlugin : BasePlugin
     private string LegacyDataPath => Path.Combine(ModuleDirectory, "skins_en.json");
     private string SkinsDbPath => Path.Combine(ModuleDirectory, "skins_db.json");
     private string StickersDbPath => Path.Combine(ModuleDirectory, "stickers_db.json");
+
+    // 默认刀（CT weapon_knife=42 / T weapon_knife_t=59 / 未设=0）绝不做 ChangeSubclass，
+    // 否则客户端 GetEconWpnData 找不到刀脚本 -> 致命断言崩溃
+    private static readonly HashSet<ushort> DefaultKnives = new() { 0, 42, 59 };
 
     private static readonly Dictionary<string, ushort> KnifeByName = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -243,6 +247,7 @@ public class PlayerSkinsPlugin : BasePlugin
 
     private void ApplyKnife(CCSPlayerPawn pawn, ushort defIndex, Loadout lo)
     {
+        if (DefaultKnives.Contains(defIndex)) return;  // 默认刀不换模型，防止客户端崩溃
         try
         {
             var ws = pawn.WeaponServices;
@@ -327,7 +332,12 @@ public class PlayerSkinsPlugin : BasePlugin
         pawn = pw; weapon = active;
         if (isKnife)
         {
-            if (_cfg.KnifeDef == 0) _cfg.KnifeDef = def;
+            // 只有已选过真实的刀才允许改其属性；默认刀不能上皮肤/换属性（会崩）
+            if (DefaultKnives.Contains(_cfg.KnifeDef))
+            {
+                Reply(player, "默认刀不能改，先用 !knife <刀名> 选一把（如 !knife karambit）");
+                return false;
+            }
             lo = _cfg.Knife;
         }
         else
@@ -454,7 +464,11 @@ public class PlayerSkinsPlugin : BasePlugin
         if (!IsRealPlayer(player)) return;
         if (info.ArgCount < 2) { Reply(player!, "用法: !knife <名字|defindex> [paintId]"); return; }
         string a = info.GetArg(1);
-        if (!ushort.TryParse(a, out ushort def) && !KnifeByName.TryGetValue(a, out def)) { Reply(player!, "认不出这把刀: " + a); return; }
+        ushort def;
+        if (!KnifeByName.TryGetValue(a, out def) && !ushort.TryParse(a, out def)) { Reply(player!, "认不出这把刀: " + a); return; }
+        // 只允许已知有效的刀，防止无效 def 触发客户端崩溃
+        if (DefaultKnives.Contains(def) || !KnifeByName.ContainsValue(def))
+        { Reply(player!, "不是有效的刀。可用: karambit/butterfly/m9/talon/stiletto/ursus/skeleton/kukri 等"); return; }
         _cfg.KnifeDef = def;
         if (info.ArgCount >= 3 && int.TryParse(info.GetArg(2), out int p)) _cfg.Knife.Paint = p;
         SaveConfig();
