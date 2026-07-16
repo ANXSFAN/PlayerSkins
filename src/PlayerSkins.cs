@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Commands;
@@ -15,10 +16,11 @@ namespace PlayerSkins;
 // BotRandomizer gate 在 IsBot，本插件 gate 在 !IsBot，二者互不干扰。
 // 支持 paint(图案) / seed(种子) / wear(磨损) / StatTrak / quality(品质) / 贴纸。
 // v1.2.0 起：配置按 SteamID 分开存（configs/<steamid>.json），多人各自独立、互不覆盖。
+// v1.2.1 起：ItemID 只在配置真正改变时才换新的（见 AssignItemId/BumpItemId）。
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.2.0";
+    public override string ModuleVersion => "1.2.1";
     public override string ModuleAuthor => "ANXSFAN";
     public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用，支持多人各自配置）";
 
@@ -298,7 +300,7 @@ public class PlayerSkinsPlugin : BasePlugin
 
             item.AttributeList.Attributes.RemoveAll();
             item.NetworkedDynamicAttributes.Attributes.RemoveAll();
-            AssignItemId(item);
+            AssignItemId(item, lo);
 
             // 品质：StatTrak 需 strange(9)，刀默认 ★(3)，纪念品(12) 等
             int q = lo.Quality;
@@ -405,7 +407,7 @@ public class PlayerSkinsPlugin : BasePlugin
             gloves.NetworkedDynamicAttributes.Attributes.RemoveAll();
             gloves.AttributeList.Attributes.RemoveAll();
             gloves.ItemDefinitionIndex = defIndex;
-            AssignItemId(gloves);
+            AssignItemId(gloves, lo);
             _setAttrByName.Invoke(gloves.NetworkedDynamicAttributes.Handle, "set item texture prefab", lo.Paint);
             _setAttrByName.Invoke(gloves.NetworkedDynamicAttributes.Handle, "set item texture seed", lo.Seed);
             _setAttrByName.Invoke(gloves.NetworkedDynamicAttributes.Handle, "set item texture wear", lo.Wear);
@@ -426,13 +428,21 @@ public class PlayerSkinsPlugin : BasePlugin
     // 把 uint 的二进制位原样当作 float 传给属性函数（贴纸id/StatTrak计数等按整数位读取的属性用）
     private static float ViewAsFloat(uint value) => BitConverter.Int32BitsToSingle((int)value);
 
-    private void AssignItemId(CEconItemView item)
+    // 客户端按 ItemID 缓存合成好的皮肤材质，缓存条目有限。
+    // 每次重生同一件装备要过好几遍 ApplyLoadout（创建钩子 2 次 + spawn 后 3 次补写），
+    // 内容完全一样，若每遍都换新 ID 就白占 5 个缓存条目 —— 反复调 seed 时很快把缓存撑满，
+    // 之后改什么都不再刷新。所以 ID 挂在 Loadout 上保持稳定，只有配置真变了才 BumpItemId。
+    private void AssignItemId(CEconItemView item, Loadout lo)
     {
-        ulong id = _nextItemId++;
+        if (lo.ItemId == 0) lo.ItemId = _nextItemId++;
+        ulong id = lo.ItemId;
         item.ItemID = id;
         item.ItemIDLow = (uint)(id & 0xFFFFFFFFu);
         item.ItemIDHigh = (uint)(id >> 32);
     }
+
+    // 配置改了才换新 ID，让客户端丢掉旧材质重新合成。必须在 ReapplyHeld 之前调用。
+    private void BumpItemId(Loadout lo) => lo.ItemId = _nextItemId++;
 
     // ---------------- 指令：作用于手持武器 ----------------
 
@@ -482,6 +492,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (info.ArgCount < 2 || !int.TryParse(info.GetArg(1), out int paint)) { Reply(player!, "用法: !skin <paintId>（手持武器）"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Paint = paint;
+        BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"已上皮肤 {paint}" + (isKnife ? "（刀）" : ""));
     }
@@ -492,6 +503,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (info.ArgCount < 2 || !int.TryParse(info.GetArg(1), out int seed)) { Reply(player!, "用法: !seed <值>，如淬火蓝宝石 !seed 661"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Seed = seed;
+        BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"图案种子已设为 {seed}");
     }
@@ -503,6 +515,7 @@ public class PlayerSkinsPlugin : BasePlugin
         wear = Math.Clamp(wear, 0f, 1f);
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Wear = wear;
+        BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"磨损已设为 {wear}");
     }
@@ -517,6 +530,7 @@ public class PlayerSkinsPlugin : BasePlugin
         else if (!int.TryParse(a, out st) || st < 0) { Reply(player!, "数字≥0，或 off 关闭"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.StatTrak = st;
+        BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, st < 0 ? "已关闭 StatTrak" : $"StatTrak 计数 = {st}（金色计数器）");
     }
@@ -537,6 +551,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (q == -2) { Reply(player!, "品质: normal/stattrak/souvenir/star"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Quality = q;
+        BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"品质已设为 {info.GetArg(1)}（金铭牌等，重生后生效更稳）");
     }
@@ -553,6 +568,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (idArg is "clear" or "clr" or "0" or "删")
         {
             lo.Stickers.Remove(slot);
+            BumpItemId(lo);
             SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
             Reply(player!, $"已清除槽位 {slot} 的贴纸（重进地图后彻底消失）");
             return;
@@ -563,6 +579,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (info.ArgCount >= 5 && float.TryParse(info.GetArg(4), out float sc)) s.Scale = sc;
         if (info.ArgCount >= 6 && float.TryParse(info.GetArg(5), out float ro)) s.Rotation = ro;
         lo.Stickers[slot] = s;
+        BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"槽位 {slot} 贴纸 id={id} 已贴（重进地图后显示）");
     }
@@ -578,6 +595,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (_setAttrByName != null && item != null)
             for (int s = 0; s < 5; s++)
                 _setAttrByName.Invoke(item.NetworkedDynamicAttributes.Handle, $"sticker slot {s} id", 0);
+        BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, "已清空该武器全部贴纸（重进地图后彻底消失）");
     }
@@ -596,6 +614,7 @@ public class PlayerSkinsPlugin : BasePlugin
         var cfg = GetCfg(player!);
         cfg.KnifeDef = def;
         if (info.ArgCount >= 3 && int.TryParse(info.GetArg(2), out int p)) cfg.Knife.Paint = p;
+        BumpItemId(cfg.Knife);
         SaveCfg(player!);
         var pawn = player!.PlayerPawn?.Value;
         if (pawn != null && pawn.IsValid) ApplyKnife(pawn, def, cfg.Knife);
@@ -609,6 +628,7 @@ public class PlayerSkinsPlugin : BasePlugin
         { Reply(player!, "用法: !gloves <defindex> <paintId>，如 !gloves 5030 10048"); return; }
         var cfg = GetCfg(player!);
         cfg.GloveDef = def; cfg.Gloves.Paint = paint;
+        BumpItemId(cfg.Gloves);
         SaveCfg(player!);
         var pawn = player!.PlayerPawn?.Value;
         if (pawn != null && pawn.IsValid) ApplyGloves(pawn, def, cfg.Gloves);
@@ -618,6 +638,12 @@ public class PlayerSkinsPlugin : BasePlugin
     private void CmdReskin(CCSPlayerController? player, CommandInfo info)
     {
         if (!IsRealPlayer(player)) return;
+        // !reskin 的语义就是“强制刷新”，所以这里全部换新 ID：配置没变时 ID 本来是稳定的，
+        // 不 bump 客户端就会直接复用旧材质，等于这条指令没用。也是客户端缓存抽风时的手动救急。
+        var cfg = GetCfg(player!);
+        foreach (var lo in cfg.Guns.Values) BumpItemId(lo);
+        BumpItemId(cfg.Knife);
+        BumpItemId(cfg.Gloves);
         var pawn = player!.PlayerPawn?.Value;
         if (pawn != null && pawn.IsValid) ApplyAll(player, pawn);
         Reply(player!, "已重新应用你的全部皮肤");
@@ -725,6 +751,10 @@ public class PlayerSkinsPlugin : BasePlugin
         public int StatTrak { get; set; } = -1;      // -1 = 关闭
         public int Quality { get; set; } = -1;        // -1 = 不覆盖
         public Dictionary<int, Sticker> Stickers { get; set; } = new();
+
+        // 这件装备当前用的 ItemID，0 = 还没分配。只存内存，不进 json：
+        // 重启后重新分配即可，客户端的材质缓存本来也随之清空。
+        [JsonIgnore] public ulong ItemId { get; set; } = 0;
     }
 
     private class SkinConfig
