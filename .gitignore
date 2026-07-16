@@ -8,6 +8,7 @@ dist/
 # 用户运行时生成的个人配置（不入库）
 config.json
 **/config.json
+configs/
 
 # IDE / OS
 .vs/

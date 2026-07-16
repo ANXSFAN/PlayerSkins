@@ -14,23 +14,30 @@ namespace PlayerSkins;
 // 仅对“真人玩家(非 bot)”生效。写皮肤底层做法与 BotRandomizer 一致（同一 CSSharp 版本验证可用）。
 // BotRandomizer gate 在 IsBot，本插件 gate 在 !IsBot，二者互不干扰。
 // 支持 paint(图案) / seed(种子) / wear(磨损) / StatTrak / quality(品质) / 贴纸。
+// v1.2.0 起：配置按 SteamID 分开存（configs/<steamid>.json），多人各自独立、互不覆盖。
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.1.2";
+    public override string ModuleVersion => "1.2.0";
     public override string ModuleAuthor => "ANXSFAN";
-    public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用）";
+    public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用，支持多人各自配置）";
 
     private MemoryFunctionVoid<nint, string, float>? _setAttrByName;
     private ulong _nextItemId = 9_000_000_000uL;
     private bool _skinErrorLogged;
 
-    private SkinConfig _cfg = new();
+    // 每个玩家一套配置（key = SteamID）
+    private readonly Dictionary<ulong, SkinConfig> _cfgs = new();
+    // 旧版单人 config.json：作为“新玩家的初始模板”，每人拿到的是深拷贝
+    private SkinConfig? _legacyTemplate;
+
     private readonly HashSet<(ushort DefIndex, int Paint)> _legacyPaints = new();
     private List<SkinEntry> _skins = new();
     private List<StickerEntry> _stickers = new();
 
-    private string ConfigPath => Path.Combine(ModuleDirectory, "config.json");
+    private string ConfigDir => Path.Combine(ModuleDirectory, "configs");
+    private string LegacyConfigPath => Path.Combine(ModuleDirectory, "config.json");
+    private string CfgPathFor(ulong steamId) => Path.Combine(ConfigDir, steamId + ".json");
     private string LegacyDataPath => Path.Combine(ModuleDirectory, "skins_en.json");
     private string SkinsDbPath => Path.Combine(ModuleDirectory, "skins_db.json");
     private string StickersDbPath => Path.Combine(ModuleDirectory, "stickers_db.json");
@@ -52,7 +59,7 @@ public class PlayerSkinsPlugin : BasePlugin
     public override void Load(bool hotReload)
     {
         _skinErrorLogged = false;
-        LoadConfig();
+        LoadLegacyTemplate();
         LoadLegacyPaints();
         _skins = LoadDb<SkinEntry>(SkinsDbPath, "皮肤");
         _stickers = LoadDb<StickerEntry>(StickersDbPath, "贴纸");
@@ -85,18 +92,112 @@ public class PlayerSkinsPlugin : BasePlugin
         AddCommand("css_knife", "换刀: !knife <名字|defindex> [paintId]", CmdKnife);
         AddCommand("css_gloves", "换手套: !gloves <defindex> <paintId>", CmdGloves);
         AddCommand("css_reskin", "立即重新应用全部皮肤", CmdReskin);
-        AddCommand("css_clearskins", "清空全部皮肤设置", CmdClear);
+        AddCommand("css_clearskins", "清空我的全部皮肤设置", CmdClear);
         AddCommand("css_skinsearch", "搜皮肤代号: !skinsearch <关键词>", CmdSkinSearch);
         AddCommand("css_ss", "!skinsearch 简写", CmdSkinSearch);
         AddCommand("css_stickersearch", "搜贴纸代号: !stickersearch <关键词>", CmdStickerSearch);
         AddCommand("css_sss", "!stickersearch 简写", CmdStickerSearch);
 
-        Logger.LogInformation("[PlayerSkins] 已加载，仅作用于真人玩家。");
+        Logger.LogInformation("[PlayerSkins] 已加载，仅作用于真人玩家，配置按 SteamID 独立。");
     }
 
     public override void Unload(bool hotReload)
     {
         VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPost, HookMode.Post);
+    }
+
+    // ---------------- 每玩家配置 ----------------
+
+    private SkinConfig GetCfg(CCSPlayerController player)
+    {
+        ulong id = player.SteamID;
+        if (_cfgs.TryGetValue(id, out var c)) return c;
+        c = LoadPlayerConfig(id);
+        _cfgs[id] = c;
+        return c;
+    }
+
+    private SkinConfig LoadPlayerConfig(ulong steamId)
+    {
+        try
+        {
+            var path = CfgPathFor(steamId);
+            if (File.Exists(path))
+            {
+                var text = File.ReadAllText(path);
+                using var doc = JsonDocument.Parse(text);
+                return doc.RootElement.TryGetProperty("Guns", out _)
+                    ? JsonSerializer.Deserialize<SkinConfig>(text) ?? new SkinConfig()
+                    : MigrateOld(doc.RootElement);
+            }
+            // 没有个人配置 -> 用旧的单人 config.json 作初始模板（必须深拷贝，否则多人共享同一对象）
+            if (_legacyTemplate != null)
+            {
+                Logger.LogInformation($"[PlayerSkins] {steamId} 无个人配置，已从旧 config.json 复制一份作为起点");
+                return CloneConfig(_legacyTemplate);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[PlayerSkins] 读取 {steamId} 配置失败: " + ex.Message);
+        }
+        return new SkinConfig();
+    }
+
+    private void SaveCfg(CCSPlayerController player)
+    {
+        try
+        {
+            Directory.CreateDirectory(ConfigDir);
+            var cfg = GetCfg(player);
+            File.WriteAllText(CfgPathFor(player.SteamID),
+                JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("[PlayerSkins] 写入配置失败: " + ex.Message);
+        }
+    }
+
+    private static SkinConfig CloneConfig(SkinConfig src)
+        => JsonSerializer.Deserialize<SkinConfig>(JsonSerializer.Serialize(src)) ?? new SkinConfig();
+
+    private void LoadLegacyTemplate()
+    {
+        _legacyTemplate = null;
+        try
+        {
+            if (!File.Exists(LegacyConfigPath)) return;
+            var text = File.ReadAllText(LegacyConfigPath);
+            using var doc = JsonDocument.Parse(text);
+            _legacyTemplate = doc.RootElement.TryGetProperty("Guns", out _)
+                ? JsonSerializer.Deserialize<SkinConfig>(text)
+                : MigrateOld(doc.RootElement);
+            if (_legacyTemplate != null)
+                Logger.LogInformation("[PlayerSkins] 已载入旧 config.json，作为新玩家的初始模板");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("[PlayerSkins] 读取旧 config.json 失败: " + ex.Message);
+        }
+    }
+
+    // 兼容 v1.0.0 的旧配置：GunPaints/KnifeDef/KnifePaint/GloveDef/GlovePaint/Seed/Wear
+    private static SkinConfig MigrateOld(JsonElement root)
+    {
+        var cfg = new SkinConfig();
+        int seed = root.TryGetProperty("Seed", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt32() : 0;
+        float wear = root.TryGetProperty("Wear", out var wv) && wv.ValueKind == JsonValueKind.Number ? wv.GetSingle() : 0.0001f;
+        if (root.TryGetProperty("GunPaints", out var gp) && gp.ValueKind == JsonValueKind.Object)
+            foreach (var kv in gp.EnumerateObject())
+                if (ushort.TryParse(kv.Name, out var def) && kv.Value.ValueKind == JsonValueKind.Number)
+                    cfg.Guns[def] = new Loadout { Paint = kv.Value.GetInt32(), Seed = seed, Wear = wear };
+        if (root.TryGetProperty("KnifeDef", out var kd) && kd.ValueKind == JsonValueKind.Number) cfg.KnifeDef = (ushort)kd.GetInt32();
+        if (root.TryGetProperty("KnifePaint", out var kp) && kp.ValueKind == JsonValueKind.Number) cfg.Knife.Paint = kp.GetInt32();
+        cfg.Knife.Seed = seed; cfg.Knife.Wear = wear;
+        if (root.TryGetProperty("GloveDef", out var gd) && gd.ValueKind == JsonValueKind.Number) cfg.GloveDef = (ushort)gd.GetInt32();
+        if (root.TryGetProperty("GlovePaint", out var gpn) && gpn.ValueKind == JsonValueKind.Number) cfg.Gloves.Paint = gpn.GetInt32();
+        return cfg;
     }
 
     // ---------------- 事件 / 钩子 ----------------
@@ -129,17 +230,18 @@ public class PlayerSkinsPlugin : BasePlugin
             var player = GetPlayerFromItemServices(itemServices);
             if (!IsRealPlayer(player)) return HookResult.Continue;
 
+            var cfg = GetCfg(player!);
             var w = weapon;
             // 关键：刀必须在创建这一刻就换 subclass，客户端才会用正确刀模型构建（否则显示默认刀）
             if (designer.Contains("knife") || designer == "weapon_bayonet")
             {
-                ApplyKnifeToWeapon(w, _cfg.KnifeDef, _cfg.Knife);
-                Server.NextFrame(() => { if (w.IsValid) ApplyKnifeToWeapon(w, _cfg.KnifeDef, _cfg.Knife); });
+                ApplyKnifeToWeapon(w, cfg.KnifeDef, cfg.Knife);
+                Server.NextFrame(() => { if (w.IsValid) ApplyKnifeToWeapon(w, cfg.KnifeDef, cfg.Knife); });
             }
             else
             {
-                ApplyToWeapon(w);
-                Server.NextFrame(() => { if (w.IsValid) ApplyToWeapon(w); });
+                ApplyToWeapon(w, cfg);
+                Server.NextFrame(() => { if (w.IsValid) ApplyToWeapon(w, cfg); });
             }
         }
         catch (Exception ex)
@@ -163,14 +265,15 @@ public class PlayerSkinsPlugin : BasePlugin
     private void ApplyAll(CCSPlayerController player, CCSPlayerPawn pawn)
     {
         if (!IsRealPlayer(player) || pawn == null || !pawn.IsValid) return;
-        if (_cfg.KnifeDef > 0) ApplyKnife(pawn, _cfg.KnifeDef, _cfg.Knife);
-        if (_cfg.GloveDef > 0) ApplyGloves(pawn, _cfg.GloveDef, _cfg.Gloves);
+        var cfg = GetCfg(player);
+        if (cfg.KnifeDef > 0) ApplyKnife(pawn, cfg.KnifeDef, cfg.Knife);
+        if (cfg.GloveDef > 0) ApplyGloves(pawn, cfg.GloveDef, cfg.Gloves);
         var ws = pawn.WeaponServices;
         if (ws == null) return;
-        foreach (var h in ws.MyWeapons) ApplyToWeapon(h.Value);
+        foreach (var h in ws.MyWeapons) ApplyToWeapon(h.Value, cfg);
     }
 
-    private void ApplyToWeapon(CBasePlayerWeapon? weapon)
+    private void ApplyToWeapon(CBasePlayerWeapon? weapon, SkinConfig cfg)
     {
         if (_setAttrByName == null || weapon == null || !weapon.IsValid) return;
         var designer = weapon.DesignerName;
@@ -180,7 +283,7 @@ public class PlayerSkinsPlugin : BasePlugin
         var item = weapon.AttributeManager?.Item;
         if (item == null) return;
         ushort def = item.ItemDefinitionIndex;
-        if (def != 0 && _cfg.Guns.TryGetValue(def, out var lo))
+        if (def != 0 && cfg.Guns.TryGetValue(def, out var lo))
             ApplyLoadout(weapon, def, lo, isKnife: false);
     }
 
@@ -337,6 +440,7 @@ public class PlayerSkinsPlugin : BasePlugin
     private bool HeldLoadout(CCSPlayerController player, out Loadout lo, out CBasePlayerWeapon weapon, out CCSPlayerPawn pawn, out bool isKnife)
     {
         lo = null!; weapon = null!; pawn = null!; isKnife = false;
+        var cfg = GetCfg(player);
         var pw = player.PlayerPawn?.Value;
         if (pw == null || !pw.IsValid) { Reply(player, "找不到角色，重生后再试"); return false; }
         var active = pw.WeaponServices?.ActiveWeapon?.Value;
@@ -351,24 +455,25 @@ public class PlayerSkinsPlugin : BasePlugin
         if (isKnife)
         {
             // 只有已选过真实的刀才允许改其属性；默认刀不能上皮肤/换属性（会崩）
-            if (DefaultKnives.Contains(_cfg.KnifeDef))
+            if (DefaultKnives.Contains(cfg.KnifeDef))
             {
                 Reply(player, "默认刀不能改，先用 !knife <刀名> 选一把（如 !knife karambit）");
                 return false;
             }
-            lo = _cfg.Knife;
+            lo = cfg.Knife;
         }
         else
         {
-            if (!_cfg.Guns.TryGetValue(def, out lo!)) { lo = new Loadout(); _cfg.Guns[def] = lo; }
+            if (!cfg.Guns.TryGetValue(def, out lo!)) { lo = new Loadout(); cfg.Guns[def] = lo; }
         }
         return true;
     }
 
     private void ReapplyHeld(CCSPlayerController player, CBasePlayerWeapon weapon, CCSPlayerPawn pawn, bool isKnife)
     {
-        if (isKnife) ApplyKnife(pawn, _cfg.KnifeDef, _cfg.Knife);
-        else ApplyToWeapon(weapon);
+        var cfg = GetCfg(player);
+        if (isKnife) ApplyKnife(pawn, cfg.KnifeDef, cfg.Knife);
+        else ApplyToWeapon(weapon, cfg);
     }
 
     private void CmdSkin(CCSPlayerController? player, CommandInfo info)
@@ -377,7 +482,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (info.ArgCount < 2 || !int.TryParse(info.GetArg(1), out int paint)) { Reply(player!, "用法: !skin <paintId>（手持武器）"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Paint = paint;
-        SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"已上皮肤 {paint}" + (isKnife ? "（刀）" : ""));
     }
 
@@ -387,7 +492,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (info.ArgCount < 2 || !int.TryParse(info.GetArg(1), out int seed)) { Reply(player!, "用法: !seed <值>，如淬火蓝宝石 !seed 661"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Seed = seed;
-        SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"图案种子已设为 {seed}");
     }
 
@@ -398,7 +503,7 @@ public class PlayerSkinsPlugin : BasePlugin
         wear = Math.Clamp(wear, 0f, 1f);
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Wear = wear;
-        SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"磨损已设为 {wear}");
     }
 
@@ -412,7 +517,7 @@ public class PlayerSkinsPlugin : BasePlugin
         else if (!int.TryParse(a, out st) || st < 0) { Reply(player!, "数字≥0，或 off 关闭"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.StatTrak = st;
-        SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, st < 0 ? "已关闭 StatTrak" : $"StatTrak 计数 = {st}（金色计数器）");
     }
 
@@ -423,7 +528,7 @@ public class PlayerSkinsPlugin : BasePlugin
         int q = info.GetArg(1).ToLowerInvariant() switch
         {
             "normal" or "普通" or "none" => -1,
-            "stattrak" or "st" or "暗金" => 9,
+            "stattrak" or "st" => 9,
             "souvenir" or "纪念品" or "sv" => 12,
             "star" or "unusual" or "★" or "刀" => 3,
             "genuine" or "正品" => 1,
@@ -432,7 +537,7 @@ public class PlayerSkinsPlugin : BasePlugin
         if (q == -2) { Reply(player!, "品质: normal/stattrak/souvenir/star"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Quality = q;
-        SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"品质已设为 {info.GetArg(1)}（金铭牌等，重生后生效更稳）");
     }
 
@@ -448,8 +553,8 @@ public class PlayerSkinsPlugin : BasePlugin
         if (idArg is "clear" or "clr" or "0" or "删")
         {
             lo.Stickers.Remove(slot);
-            SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
-            Reply(player!, $"已清除槽位 {slot} 的贴纸（重生后彻底消失）");
+            SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
+            Reply(player!, $"已清除槽位 {slot} 的贴纸（重进地图后彻底消失）");
             return;
         }
         if (!int.TryParse(idArg, out int id) || id <= 0) { Reply(player!, "贴纸 id 必须是正整数，或 clear 清除"); return; }
@@ -458,8 +563,8 @@ public class PlayerSkinsPlugin : BasePlugin
         if (info.ArgCount >= 5 && float.TryParse(info.GetArg(4), out float sc)) s.Scale = sc;
         if (info.ArgCount >= 6 && float.TryParse(info.GetArg(5), out float ro)) s.Rotation = ro;
         lo.Stickers[slot] = s;
-        SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
-        Reply(player!, $"槽位 {slot} 贴纸 id={id} 已贴");
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
+        Reply(player!, $"槽位 {slot} 贴纸 id={id} 已贴（重进地图后显示）");
     }
 
     private void CmdStickerClear(CCSPlayerController? player, CommandInfo info)
@@ -468,13 +573,13 @@ public class PlayerSkinsPlugin : BasePlugin
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         if (isKnife) { Reply(player!, "刀没有贴纸"); return; }
         lo.Stickers.Clear();
-        // 立即把 4 个槽位 id 置 0（配合重生彻底清除）
+        // 立即把 5 个槽位 id 置 0（配合重进地图彻底清除）
         var item = w.AttributeManager?.Item;
         if (_setAttrByName != null && item != null)
             for (int s = 0; s < 5; s++)
                 _setAttrByName.Invoke(item.NetworkedDynamicAttributes.Handle, $"sticker slot {s} id", 0);
-        SaveConfig(); ReapplyHeld(player!, w, pawn, isKnife);
-        Reply(player!, "已清空该武器全部贴纸（重生后彻底消失）");
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
+        Reply(player!, "已清空该武器全部贴纸（重进地图后彻底消失）");
     }
 
     private void CmdKnife(CCSPlayerController? player, CommandInfo info)
@@ -487,12 +592,14 @@ public class PlayerSkinsPlugin : BasePlugin
         // 只允许已知有效的刀，防止无效 def 触发客户端崩溃
         if (DefaultKnives.Contains(def) || !KnifeByName.ContainsValue(def))
         { Reply(player!, "不是有效的刀。可用: karambit/butterfly/m9/talon/stiletto/ursus/skeleton/kukri 等"); return; }
-        _cfg.KnifeDef = def;
-        if (info.ArgCount >= 3 && int.TryParse(info.GetArg(2), out int p)) _cfg.Knife.Paint = p;
-        SaveConfig();
+
+        var cfg = GetCfg(player!);
+        cfg.KnifeDef = def;
+        if (info.ArgCount >= 3 && int.TryParse(info.GetArg(2), out int p)) cfg.Knife.Paint = p;
+        SaveCfg(player!);
         var pawn = player!.PlayerPawn?.Value;
-        if (pawn != null && pawn.IsValid) ApplyKnife(pawn, def, _cfg.Knife);
-        Reply(player!, $"刀已设为 defindex {def}，皮肤 {_cfg.Knife.Paint}");
+        if (pawn != null && pawn.IsValid) ApplyKnife(pawn, def, cfg.Knife);
+        Reply(player!, $"刀已设为 defindex {def}，皮肤 {cfg.Knife.Paint}（重生一次模型才切换）");
     }
 
     private void CmdGloves(CCSPlayerController? player, CommandInfo info)
@@ -500,10 +607,11 @@ public class PlayerSkinsPlugin : BasePlugin
         if (!IsRealPlayer(player)) return;
         if (info.ArgCount < 3 || !ushort.TryParse(info.GetArg(1), out ushort def) || !int.TryParse(info.GetArg(2), out int paint))
         { Reply(player!, "用法: !gloves <defindex> <paintId>，如 !gloves 5030 10048"); return; }
-        _cfg.GloveDef = def; _cfg.Gloves.Paint = paint;
-        SaveConfig();
+        var cfg = GetCfg(player!);
+        cfg.GloveDef = def; cfg.Gloves.Paint = paint;
+        SaveCfg(player!);
         var pawn = player!.PlayerPawn?.Value;
-        if (pawn != null && pawn.IsValid) ApplyGloves(pawn, def, _cfg.Gloves);
+        if (pawn != null && pawn.IsValid) ApplyGloves(pawn, def, cfg.Gloves);
         Reply(player!, $"手套已设为 defindex {def}，皮肤 {paint}");
     }
 
@@ -512,15 +620,15 @@ public class PlayerSkinsPlugin : BasePlugin
         if (!IsRealPlayer(player)) return;
         var pawn = player!.PlayerPawn?.Value;
         if (pawn != null && pawn.IsValid) ApplyAll(player, pawn);
-        Reply(player!, "已重新应用全部皮肤");
+        Reply(player!, "已重新应用你的全部皮肤");
     }
 
     private void CmdClear(CCSPlayerController? player, CommandInfo info)
     {
         if (!IsRealPlayer(player)) return;
-        _cfg = new SkinConfig();
-        SaveConfig();
-        Reply(player!, "已清空全部皮肤设置（下回合或重连生效）");
+        _cfgs[player!.SteamID] = new SkinConfig();
+        SaveCfg(player!);
+        Reply(player!, "已清空你的全部皮肤设置（下回合或重连生效）");
     }
 
     // ---------------- 搜索 ----------------
@@ -564,49 +672,6 @@ public class PlayerSkinsPlugin : BasePlugin
         => player != null && player.IsValid && !player.IsBot && !player.IsHLTV;
 
     private void Reply(CCSPlayerController player, string msg) => player.PrintToChat($" \x04[皮肤]\x01 {msg}");
-
-    private void LoadConfig()
-    {
-        try
-        {
-            if (!File.Exists(ConfigPath)) { _cfg = new SkinConfig(); return; }
-            var text = File.ReadAllText(ConfigPath);
-            using var doc = JsonDocument.Parse(text);
-            if (doc.RootElement.TryGetProperty("Guns", out _))
-                _cfg = JsonSerializer.Deserialize<SkinConfig>(text) ?? new SkinConfig();
-            else
-                _cfg = MigrateOld(doc.RootElement);   // 旧格式（GunPaints/KnifePaint...）
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError("[PlayerSkins] 读取 config.json 失败: " + ex.Message);
-            _cfg = new SkinConfig();
-        }
-    }
-
-    // 兼容 v1.0.0 的旧配置：GunPaints/KnifeDef/KnifePaint/GloveDef/GlovePaint/Seed/Wear
-    private static SkinConfig MigrateOld(JsonElement root)
-    {
-        var cfg = new SkinConfig();
-        int seed = root.TryGetProperty("Seed", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt32() : 0;
-        float wear = root.TryGetProperty("Wear", out var wv) && wv.ValueKind == JsonValueKind.Number ? wv.GetSingle() : 0.0001f;
-        if (root.TryGetProperty("GunPaints", out var gp) && gp.ValueKind == JsonValueKind.Object)
-            foreach (var kv in gp.EnumerateObject())
-                if (ushort.TryParse(kv.Name, out var def) && kv.Value.ValueKind == JsonValueKind.Number)
-                    cfg.Guns[def] = new Loadout { Paint = kv.Value.GetInt32(), Seed = seed, Wear = wear };
-        if (root.TryGetProperty("KnifeDef", out var kd) && kd.ValueKind == JsonValueKind.Number) cfg.KnifeDef = (ushort)kd.GetInt32();
-        if (root.TryGetProperty("KnifePaint", out var kp) && kp.ValueKind == JsonValueKind.Number) cfg.Knife.Paint = kp.GetInt32();
-        cfg.Knife.Seed = seed; cfg.Knife.Wear = wear;
-        if (root.TryGetProperty("GloveDef", out var gd) && gd.ValueKind == JsonValueKind.Number) cfg.GloveDef = (ushort)gd.GetInt32();
-        if (root.TryGetProperty("GlovePaint", out var gpn) && gpn.ValueKind == JsonValueKind.Number) cfg.Gloves.Paint = gpn.GetInt32();
-        return cfg;
-    }
-
-    private void SaveConfig()
-    {
-        try { File.WriteAllText(ConfigPath, JsonSerializer.Serialize(_cfg, new JsonSerializerOptions { WriteIndented = true })); }
-        catch (Exception ex) { Logger.LogError("[PlayerSkins] 写入 config.json 失败: " + ex.Message); }
-    }
 
     private List<T> LoadDb<T>(string path, string label)
     {

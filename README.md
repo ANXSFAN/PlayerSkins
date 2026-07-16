@@ -45,7 +45,8 @@
      ├─ PlayerSkins.deps.json
      ├─ skins_en.json       (legacy 老模型皮肤位置判断)
      ├─ skins_db.json       (!skinsearch 皮肤名称库)
-     └─ stickers_db.json    (!stickersearch 贴纸名称库)
+     ├─ stickers_db.json    (!stickersearch 贴纸名称库)
+     └─ configs\            (运行时自动生成：每位玩家一份 <SteamID>.json)
    ```
 3. 启动打人机（开图自动加载），或在服务器控制台执行：
    ```
@@ -96,7 +97,9 @@
 | `!skinsearch <关键词>` / `!ss` | 搜皮肤代号（中英文） | `!ss 龙` / `!ss awp dragon` |
 | `!stickersearch <关键词>` / `!sss` | 搜贴纸代号 | `!sss titan` |
 
-- 所有选择自动保存到插件目录 `config.json`，**重启游戏后仍生效**。
+- 所有选择自动保存到插件目录 `configs/<你的SteamID>.json`，**重启游戏后仍生效**。
+- **多人各自独立**：每位真人玩家有自己的一套配置，`!skin` 只改自己的，互不覆盖（朋友连进你的服务器一起打人机也没问题）。
+- 若插件目录下存在旧版单文件 `config.json`，它会作为**新玩家的初始模板**（各自拿到独立副本），想从零开始输 `!clearskins` 即可。
 - 刀名支持：`karambit` `butterfly` `m9` `bayonet` `flip` `talon` `stiletto` `ursus` `skeleton` `kukri` 等。
 - 手套 defindex：`5027`(血猎) `5030`(运动) `5031`(驾驶) `5032`(缠绕) `5033`(摩托) `5034`(专业) `5035`(九头蛇) `4725`(狂牙)。
 
