@@ -17,10 +17,12 @@ namespace PlayerSkins;
 // 支持 paint(图案) / seed(种子) / wear(磨损) / StatTrak / quality(品质) / 贴纸。
 // v1.2.0 起：配置按 SteamID 分开存（configs/<steamid>.json），多人各自独立、互不覆盖。
 // v1.2.1 起：ItemID 只在配置真正改变时才换新的（见 AssignItemId/BumpItemId）。
+// v1.2.2 起：!knife 皮肤参数写错会明确报错；!quality stattrak 自动开计数；!stattrak 自动清冲突品质。
+// v1.2.3 起：Windows 特征码放宽，不再写死 sub rsp 的立即数（跟 CS2-Bot-Improver v1.4.3 对齐）。
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.2.1";
+    public override string ModuleVersion => "1.2.3";
     public override string ModuleAuthor => "ANXSFAN";
     public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用，支持多人各自配置）";
 
@@ -71,7 +73,9 @@ public class PlayerSkinsPlugin : BasePlugin
             _setAttrByName = new MemoryFunctionVoid<nint, string, float>(
                 RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
                     ? "55 48 89 E5 41 57 41 56 49 89 FE 41 55 41 54 53 48 89 F3 48 83 EC ? F3 0F 11 85"
-                    : "40 53 55 41 56 48 81 EC 90 00 00 00");
+                    // sub rsp 的立即数会随 V 社改栈帧变动，通配掉，改用后面的 movaps 当锚点
+                    // （与 CS2-Bot-Improver v1.4.3 的 BotRandomizer 保持一致）
+                    : "40 53 55 41 56 48 81 EC ? ? ? ? 0F 29 74 24");
         }
         catch (Exception ex)
         {
@@ -530,9 +534,15 @@ public class PlayerSkinsPlugin : BasePlugin
         else if (!int.TryParse(a, out st) || st < 0) { Reply(player!, "数字≥0，或 off 关闭"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.StatTrak = st;
+        // 显式设过的品质会顶掉 StatTrak 隐含的 9（见 ApplyLoadout），计数器就不显示了 —— 开计数时清掉冲突品质
+        if (st >= 0 && lo.Quality >= 0 && lo.Quality != 9)
+        {
+            lo.Quality = -1;
+            Reply(player!, "之前设的品质和 StatTrak 冲突，已清掉，否则计数器不显示");
+        }
         BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
-        Reply(player!, st < 0 ? "已关闭 StatTrak" : $"StatTrak 计数 = {st}（金色计数器）");
+        Reply(player!, st < 0 ? "已关闭 StatTrak" : $"StatTrak 计数 = {st}（金色计数器，中途开的话重生/!reskin 后计数器才挂上）");
     }
 
     private void CmdQuality(CCSPlayerController? player, CommandInfo info)
@@ -551,6 +561,12 @@ public class PlayerSkinsPlugin : BasePlugin
         if (q == -2) { Reply(player!, "品质: normal/stattrak/souvenir/star"); return; }
         if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
         lo.Quality = q;
+        // 计数器要靠 kill eater 属性，光有品质 9 只会名字暗金没有计数器 —— 帮用户把计数一并打开
+        if (q == 9 && lo.StatTrak < 0)
+        {
+            lo.StatTrak = 0;
+            Reply(player!, "已顺带打开 StatTrak 计数（=0），改数字用 !stattrak <数>");
+        }
         BumpItemId(lo);
         SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
         Reply(player!, $"品质已设为 {info.GetArg(1)}（金铭牌等，重生后生效更稳）");
@@ -611,9 +627,14 @@ public class PlayerSkinsPlugin : BasePlugin
         if (DefaultKnives.Contains(def) || !KnifeByName.ContainsValue(def))
         { Reply(player!, "不是有效的刀。可用: karambit/butterfly/m9/talon/stiletto/ursus/skeleton/kukri 等"); return; }
 
+        // 第二个参数必须是数字；"!knife M9 Bayonet 568" 这类把刀名拆成两个词的写法要明确报错，不能静默忽略
+        int paint = -1;
+        if (info.ArgCount >= 3 && !int.TryParse(info.GetArg(2), out paint))
+        { Reply(player!, $"皮肤 id「{info.GetArg(2)}」没读懂，刀名要写成一个词，如 !knife m9 568"); return; }
+
         var cfg = GetCfg(player!);
         cfg.KnifeDef = def;
-        if (info.ArgCount >= 3 && int.TryParse(info.GetArg(2), out int p)) cfg.Knife.Paint = p;
+        if (paint >= 0) cfg.Knife.Paint = paint;
         BumpItemId(cfg.Knife);
         SaveCfg(player!);
         var pawn = player!.PlayerPawn?.Value;

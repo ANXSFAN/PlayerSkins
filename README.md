@@ -9,7 +9,7 @@
 
 给 **真人玩家** 上武器 / 刀 / 手套皮肤的 CounterStrikeSharp 插件，用于 **`-insecure` 离线打人机自用**。
 
-配合 [CS2-Bot-Improver](https://github.com/ed0ard/CS2-Bot-Improver) 使用：它的 `BotRandomizer` 只给 **bot** 上皮肤，本插件只给 **真人**（`!IsBot`）上皮肤，两者互不冲突。
+配合 [CS2-Bot-Improver](https://github.com/ed0ard/CS2-Bot-Improver) 使用：它的 `BotRandomizer` 只给 **bot** 上皮肤（v1.4.3 起还有贴纸和挂件），本插件只给 **真人**（`!IsBot`）上皮肤，两者互不冲突。
 
 ---
 
@@ -26,7 +26,7 @@
 
 ## 前提条件
 
-目标机需已安装 **CS2-Bot-Improver v1.4.2**（即 Metamod + **CounterStrikeSharp 1.0.371**）。
+目标机需已安装 **CS2-Bot-Improver v1.4.2 或 v1.4.3**（即 Metamod + **CounterStrikeSharp 1.0.371**）。
 本插件在 **CounterStrikeSharp 1.0.371 / net10.0** 上测试通过；CSSharp 版本差太多可能需要重新编译（见下方「从源码编译」）。
 
 ---
