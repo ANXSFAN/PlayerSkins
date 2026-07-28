@@ -19,10 +19,11 @@ namespace PlayerSkins;
 // v1.2.1 起：ItemID 只在配置真正改变时才换新的（见 AssignItemId/BumpItemId）。
 // v1.2.2 起：!knife 皮肤参数写错会明确报错；!quality stattrak 自动开计数；!stattrak 自动清冲突品质。
 // v1.2.3 起：Windows 特征码放宽，不再写死 sub rsp 的立即数（跟 CS2-Bot-Improver v1.4.3 对齐）。
+// v1.2.4 起：插件生成的 StatTrak 会在有效击杀后自行累加并保存。
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.2.3";
+    public override string ModuleVersion => "1.2.4";
     public override string ModuleAuthor => "ANXSFAN";
     public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用，支持多人各自配置）";
 
@@ -84,6 +85,7 @@ public class PlayerSkinsPlugin : BasePlugin
         }
 
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn, HookMode.Post);
+        RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath, HookMode.Post);
         VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveNamedItemPost, HookMode.Post);
 
         AddCommand("css_skin", "手持武器上皮肤: !skin <paintId>", CmdSkin);
@@ -220,6 +222,59 @@ public class PlayerSkinsPlugin : BasePlugin
         AddTimer(0.1f, () => { if (pw.IsValid) ApplyAll(p, pw); });
         AddTimer(0.25f, () => { if (pw.IsValid) ApplyAll(p, pw); });
         return HookResult.Continue;
+    }
+
+    private HookResult OnPlayerDeath(EventPlayerDeath @event, GameEventInfo info)
+    {
+        var attacker = @event.Attacker;
+        var victim = @event.Userid;
+        if (!IsRealPlayer(attacker) || victim == null || !victim.IsValid) return HookResult.Continue;
+        if (attacker!.Index == victim.Index || attacker.TeamNum == victim.TeamNum) return HookResult.Continue;
+
+        var pawn = attacker.PlayerPawn?.Value;
+        var weapon = pawn?.WeaponServices?.ActiveWeapon?.Value;
+        if (pawn == null || !pawn.IsValid || weapon == null || !weapon.IsValid) return HookResult.Continue;
+
+        // 投掷物击杀发生时玩家通常已经切回枪；必须核对事件中的武器名，
+        // 否则手雷/燃烧弹击杀会错误地给当前手持枪加一。
+        if (!KillWeaponMatches(@event.Weapon, weapon.DesignerName)) return HookResult.Continue;
+
+        var cfg = GetCfg(attacker);
+        var designer = weapon.DesignerName ?? "";
+        bool isKnife = designer.Contains("knife") || designer == "weapon_bayonet";
+        Loadout? lo;
+        if (isKnife)
+        {
+            if (DefaultKnives.Contains(cfg.KnifeDef)) return HookResult.Continue;
+            lo = cfg.Knife;
+        }
+        else
+        {
+            var item = weapon.AttributeManager?.Item;
+            if (item == null || !cfg.Guns.TryGetValue(item.ItemDefinitionIndex, out lo))
+                return HookResult.Continue;
+        }
+
+        if (lo.StatTrak < 0) return HookResult.Continue;
+        if (lo.StatTrak < int.MaxValue) lo.StatTrak++;
+        SyncStatTrak(weapon, lo);
+        SaveCfg(attacker);
+        return HookResult.Continue;
+    }
+
+    private static bool KillWeaponMatches(string? eventWeapon, string? designerName)
+    {
+        if (string.IsNullOrWhiteSpace(eventWeapon) || string.IsNullOrWhiteSpace(designerName)) return false;
+        string eventName = eventWeapon.StartsWith("weapon_", StringComparison.Ordinal)
+            ? eventWeapon[7..]
+            : eventWeapon;
+        string entityName = designerName.StartsWith("weapon_", StringComparison.Ordinal)
+            ? designerName[7..]
+            : designerName;
+
+        bool eventIsKnife = eventName == "bayonet" || eventName.StartsWith("knife", StringComparison.Ordinal);
+        bool entityIsKnife = entityName == "bayonet" || entityName.StartsWith("knife", StringComparison.Ordinal);
+        return eventIsKnife ? entityIsKnife : eventName == entityName;
     }
 
     private HookResult OnGiveNamedItemPost(DynamicHook hook)
@@ -361,6 +416,20 @@ public class PlayerSkinsPlugin : BasePlugin
                 _setAttrByName!.Invoke(handle, $"sticker slot {slot} rotation", s.Rotation);
             }
         }
+    }
+
+    private void SyncStatTrak(CBasePlayerWeapon weapon, Loadout lo)
+    {
+        if (_setAttrByName == null || !weapon.IsValid || lo.StatTrak < 0) return;
+        var item = weapon.AttributeManager?.Item;
+        if (item == null) return;
+
+        weapon.FallbackStatTrak = lo.StatTrak;
+        float count = ViewAsFloat((uint)lo.StatTrak);
+        _setAttrByName.Invoke(item.NetworkedDynamicAttributes.Handle, "kill eater", count);
+        _setAttrByName.Invoke(item.AttributeList.Handle, "kill eater", count);
+        Utilities.SetStateChanged(weapon, "CEconEntity", "m_nFallbackStatTrak");
+        Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
     }
 
     // 在指定刀实体上换 subclass + 上皮肤（供创建钩子与 ApplyAll 共用）

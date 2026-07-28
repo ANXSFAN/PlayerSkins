@@ -75,7 +75,7 @@
 |---|---|---|
 | `!seed <值>` | 图案种子（决定花色，如淬火蓝宝石、渐变%、大理石花纹） | 淬火蓝宝石：`!skin 44` → `!seed 661` |
 | `!wear <0-1>` | 磨损（0=崭新，1=战痕） | `!wear 0.0001` |
-| `!stattrak <数\|off>` / `!st` | StatTrak 金色计数器 | `!stattrak 1337` / `!st off` |
+| `!stattrak <数\|off>` / `!st` | StatTrak 金色计数器；击杀敌人后自动累加并保存 | `!stattrak 1337` / `!st off` |
 | `!quality <normal\|stattrak\|souvenir\|star>` | 物品品质（`souvenir`=纪念品金铭牌，如纪念品龙狙） | 拿 AWP `!skin 344` → `!quality souvenir` |
 
 ### 贴纸
