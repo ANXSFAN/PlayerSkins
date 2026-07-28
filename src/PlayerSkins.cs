@@ -20,10 +20,11 @@ namespace PlayerSkins;
 // v1.2.2 起：!knife 皮肤参数写错会明确报错；!quality stattrak 自动开计数；!stattrak 自动清冲突品质。
 // v1.2.3 起：Windows 特征码放宽，不再写死 sub rsp 的立即数（跟 CS2-Bot-Improver v1.4.3 对齐）。
 // v1.2.4 起：插件生成的 StatTrak 会在有效击杀后自行累加并保存。
+// v1.2.5 起：击杀凶器按事件里的武器名到背包里找，不再拿 ActiveWeapon 猜；队友击杀也计数。
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.2.4";
+    public override string ModuleVersion => "1.2.5";
     public override string ModuleAuthor => "ANXSFAN";
     public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用，支持多人各自配置）";
 
@@ -229,15 +230,18 @@ public class PlayerSkinsPlugin : BasePlugin
         var attacker = @event.Attacker;
         var victim = @event.Userid;
         if (!IsRealPlayer(attacker) || victim == null || !victim.IsValid) return HookResult.Continue;
-        if (attacker!.Index == victim.Index || attacker.TeamNum == victim.TeamNum) return HookResult.Continue;
+        // 只排除自杀。队友击杀也算（真实 StatTrak 就是"这把枪的击杀数"），
+        // 且 FFA/死斗里所有人名义上同队，按队伍过滤会把整个模式的击杀吞掉。
+        if (attacker!.Index == victim.Index) return HookResult.Continue;
 
         var pawn = attacker.PlayerPawn?.Value;
-        var weapon = pawn?.WeaponServices?.ActiveWeapon?.Value;
-        if (pawn == null || !pawn.IsValid || weapon == null || !weapon.IsValid) return HookResult.Continue;
+        if (pawn == null || !pawn.IsValid) return HookResult.Continue;
 
-        // 投掷物击杀发生时玩家通常已经切回枪；必须核对事件中的武器名，
-        // 否则手雷/燃烧弹击杀会错误地给当前手持枪加一。
-        if (!KillWeaponMatches(@event.Weapon, weapon.DesignerName)) return HookResult.Continue;
+        // 不能拿 ActiveWeapon 当凶器：击杀瞬间玩家往往已经切枪了（打完切刀跑图最常见），
+        // 那样判定会随手速时灵时不灵。事件里的 @event.Weapon 才是真凶器，
+        // 按它到背包里找对应实体。找不到（手雷/燃烧弹/摔死等）就不计数。
+        var weapon = FindKillWeapon(pawn, @event.Weapon);
+        if (weapon == null) return HookResult.Continue;
 
         var cfg = GetCfg(attacker);
         var designer = weapon.DesignerName ?? "";
@@ -260,6 +264,21 @@ public class PlayerSkinsPlugin : BasePlugin
         SyncStatTrak(weapon, lo);
         SaveCfg(attacker);
         return HookResult.Continue;
+    }
+
+    // 按事件里报的凶器名，在攻击者背包里找出那把武器实体
+    private static CBasePlayerWeapon? FindKillWeapon(CCSPlayerPawn pawn, string? eventWeapon)
+    {
+        if (string.IsNullOrWhiteSpace(eventWeapon)) return null;
+        var weapons = pawn.WeaponServices?.MyWeapons;
+        if (weapons == null) return null;
+        foreach (var handle in weapons)
+        {
+            var w = handle.Value;
+            if (w == null || !w.IsValid) continue;
+            if (KillWeaponMatches(eventWeapon, w.DesignerName)) return w;
+        }
+        return null;
     }
 
     private static bool KillWeaponMatches(string? eventWeapon, string? designerName)
