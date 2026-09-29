@@ -21,12 +21,15 @@ namespace PlayerSkins;
 // v1.2.3 起：Windows 特征码放宽，不再写死 sub rsp 的立即数（跟 CS2-Bot-Improver v1.4.3 对齐）。
 // v1.2.4 起：插件生成的 StatTrak 会在有效击杀后自行累加并保存。
 // v1.2.5 起：击杀凶器按事件里的武器名到背包里找，不再拿 ActiveWeapon 猜；队友击杀也计数。
+// v1.3.0 起：支持挂件（keychain，写法对齐 BotRandomizer v1.3.0），以及 !pro 一键切换职业选手库存预设。
+//           挂件位置表优先读本插件目录、其次读旁边 BotRandomizer 的 charm_placements.json（不打包，避免 AGPL 数据进 MIT 仓库）。
+// v1.3.1 起：适配 2026-09-23 游戏更新，换用新的 Windows 写属性特征码。
 public class PlayerSkinsPlugin : BasePlugin
 {
     public override string ModuleName => "PlayerSkins";
-    public override string ModuleVersion => "1.2.5";
+    public override string ModuleVersion => "1.3.1";
     public override string ModuleAuthor => "ANXSFAN";
-    public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸（insecure 打人机自用，支持多人各自配置）";
+    public override string ModuleDescription => "给真人玩家上枪/刀/手套皮肤+种子/磨损/StatTrak/品质/贴纸/挂件，含职业选手库存一键预设（insecure 打人机自用，支持多人各自配置）";
 
     private MemoryFunctionVoid<nint, string, float>? _setAttrByName;
     private ulong _nextItemId = 9_000_000_000uL;
@@ -40,6 +43,10 @@ public class PlayerSkinsPlugin : BasePlugin
     private readonly HashSet<(ushort DefIndex, int Paint)> _legacyPaints = new();
     private List<SkinEntry> _skins = new();
     private List<StickerEntry> _stickers = new();
+    private List<CharmEntry> _charms = new();
+    private List<ProEntry> _pros = new();
+    // 挂件位置表：武器 defindex -> 若干组 [x,y,z]（来自 BotRandomizer 的 charm_placements.json）
+    private readonly Dictionary<ushort, List<float[]>> _charmPlacements = new();
 
     private string ConfigDir => Path.Combine(ModuleDirectory, "configs");
     private string LegacyConfigPath => Path.Combine(ModuleDirectory, "config.json");
@@ -47,6 +54,9 @@ public class PlayerSkinsPlugin : BasePlugin
     private string LegacyDataPath => Path.Combine(ModuleDirectory, "skins_en.json");
     private string SkinsDbPath => Path.Combine(ModuleDirectory, "skins_db.json");
     private string StickersDbPath => Path.Combine(ModuleDirectory, "stickers_db.json");
+    private string CharmsDbPath => Path.Combine(ModuleDirectory, "charms_db.json");
+    private string ProLoadoutsPath => Path.Combine(ModuleDirectory, "pro_loadouts.json");
+    private string BackupCfgPathFor(ulong steamId) => Path.Combine(ConfigDir, steamId + ".backup.json");
 
     // 默认刀（CT weapon_knife=42 / T weapon_knife_t=59 / 未设=0）绝不做 ChangeSubclass，
     // 否则客户端 GetEconWpnData 找不到刀脚本 -> 致命断言崩溃
@@ -69,15 +79,18 @@ public class PlayerSkinsPlugin : BasePlugin
         LoadLegacyPaints();
         _skins = LoadDb<SkinEntry>(SkinsDbPath, "皮肤");
         _stickers = LoadDb<StickerEntry>(StickersDbPath, "贴纸");
+        _charms = LoadDb<CharmEntry>(CharmsDbPath, "挂件");
+        _pros = LoadDb<ProEntry>(ProLoadoutsPath, "选手预设");
+        LoadCharmPlacements();
 
         try
         {
             _setAttrByName = new MemoryFunctionVoid<nint, string, float>(
                 RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
                     ? "55 48 89 E5 41 57 41 56 49 89 FE 41 55 41 54 53 48 89 F3 48 83 EC ? F3 0F 11 85"
-                    // sub rsp 的立即数会随 V 社改栈帧变动，通配掉，改用后面的 movaps 当锚点
-                    // （与 CS2-Bot-Improver v1.4.3 的 BotRandomizer 保持一致）
-                    : "40 53 55 41 56 48 81 EC ? ? ? ? 0F 29 74 24");
+                    // 2026-09-23 游戏更新后函数头的寄存器变了（push rbp 换成了 push r13），旧特征码失配。
+                    // 新特征码取自 ModSharp 的 GameUpdate 2026/09/23，并把 sub rsp 立即数和 movaps 的栈偏移都通配掉。
+                    : "48 89 4C 24 08 53 41 55 41 56 48 81 EC ? ? ? ? 0F 29 74 24 ? 48 8B DA");
         }
         catch (Exception ex)
         {
@@ -106,6 +119,11 @@ public class PlayerSkinsPlugin : BasePlugin
         AddCommand("css_ss", "!skinsearch 简写", CmdSkinSearch);
         AddCommand("css_stickersearch", "搜贴纸代号: !stickersearch <关键词>", CmdStickerSearch);
         AddCommand("css_sss", "!stickersearch 简写", CmdStickerSearch);
+        AddCommand("css_charm", "挂件: !charm <id|clear> [位置序号] [seed]", CmdCharm);
+        AddCommand("css_charmsearch", "搜挂件代号: !charmsearch <关键词>", CmdCharmSearch);
+        AddCommand("css_cs", "!charmsearch 简写", CmdCharmSearch);
+        AddCommand("css_pro", "一键换职业选手库存: !pro <选手名>，!pro 看列表", CmdPro);
+        AddCommand("css_unpro", "恢复 !pro 之前自己的配置", CmdUnpro);
 
         Logger.LogInformation("[PlayerSkins] 已加载，仅作用于真人玩家，配置按 SteamID 独立。");
     }
@@ -391,8 +409,8 @@ public class PlayerSkinsPlugin : BasePlugin
             weapon.FallbackWear = lo.Wear;
             weapon.FallbackStatTrak = lo.StatTrak;
 
-            WriteAttrs(item.NetworkedDynamicAttributes.Handle, lo, isKnife, applyStickers: true);
-            WriteAttrs(item.AttributeList.Handle, lo, isKnife, applyStickers: false);
+            WriteAttrs(item.NetworkedDynamicAttributes.Handle, defIndex, lo, isKnife, applyStickers: true);
+            WriteAttrs(item.AttributeList.Handle, defIndex, lo, isKnife, applyStickers: false);
             Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
 
             if (!isKnife)
@@ -407,7 +425,7 @@ public class PlayerSkinsPlugin : BasePlugin
         }
     }
 
-    private void WriteAttrs(nint handle, Loadout lo, bool isKnife, bool applyStickers)
+    private void WriteAttrs(nint handle, ushort defIndex, Loadout lo, bool isKnife, bool applyStickers)
     {
         _setAttrByName!.Invoke(handle, "set item texture prefab", lo.Paint);
         _setAttrByName!.Invoke(handle, "set item texture seed", lo.Seed);
@@ -435,6 +453,31 @@ public class PlayerSkinsPlugin : BasePlugin
                 _setAttrByName!.Invoke(handle, $"sticker slot {slot} rotation", s.Rotation);
             }
         }
+        // 挂件（keychain）：与贴纸同理只写 NetworkedDynamicAttributes，id/seed 按位重解释。
+        // 位置 offset x/y/z 来自位置表或显式指定；没有就不写（游戏用默认挂点）。写法对齐 BotRandomizer v1.3.0。
+        if (applyStickers && !isKnife && lo.Charm != null && lo.Charm.Id > 0)
+        {
+            var c = lo.Charm;
+            _setAttrByName!.Invoke(handle, "keychain slot 0 id", ViewAsFloat((uint)c.Id));
+            _setAttrByName!.Invoke(handle, "keychain slot 0 seed", ViewAsFloat((uint)c.Seed));
+            var pos = ResolveCharmPos(defIndex, c);
+            if (pos != null)
+            {
+                _setAttrByName!.Invoke(handle, "keychain slot 0 offset x", pos[0]);
+                _setAttrByName!.Invoke(handle, "keychain slot 0 offset y", pos[1]);
+                _setAttrByName!.Invoke(handle, "keychain slot 0 offset z", pos[2]);
+            }
+        }
+    }
+
+    // 挂件位置：显式坐标优先；否则查位置表按序号取（序号越界回绕到 0）；都没有返回 null
+    private float[]? ResolveCharmPos(ushort defIndex, Charm c)
+    {
+        if (c.X.HasValue && c.Y.HasValue && c.Z.HasValue)
+            return new[] { c.X.Value, c.Y.Value, c.Z.Value };
+        if (_charmPlacements.TryGetValue(defIndex, out var list) && list.Count > 0)
+            return list[c.Pos >= 0 && c.Pos < list.Count ? c.Pos : 0];
+        return null;
     }
 
     private void SyncStatTrak(CBasePlayerWeapon weapon, Loadout lo)
@@ -704,6 +747,42 @@ public class PlayerSkinsPlugin : BasePlugin
         Reply(player!, "已清空该武器全部贴纸（重进地图后彻底消失）");
     }
 
+    private void CmdCharm(CCSPlayerController? player, CommandInfo info)
+    {
+        if (!IsRealPlayer(player)) return;
+        if (info.ArgCount < 2) { Reply(player!, "用法: !charm <id|clear> [位置序号] [seed]，搜 id 用 !cs <关键词>"); return; }
+        if (!HeldLoadout(player!, out var lo, out var w, out var pawn, out var isKnife)) return;
+        if (isKnife) { Reply(player!, "挂件不能挂在刀上"); return; }
+
+        var idArg = info.GetArg(1).ToLowerInvariant();
+        if (idArg is "clear" or "clr" or "0" or "删")
+        {
+            lo.Charm = null;
+            // 立即把 keychain id 置 0（配合重进地图彻底清除，与贴纸清除同理）
+            var item = w.AttributeManager?.Item;
+            if (_setAttrByName != null && item != null)
+                _setAttrByName.Invoke(item.NetworkedDynamicAttributes.Handle, "keychain slot 0 id", 0);
+            BumpItemId(lo);
+            SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
+            Reply(player!, "已摘掉挂件（重进地图后彻底消失）");
+            return;
+        }
+        if (!int.TryParse(idArg, out int id) || id <= 0) { Reply(player!, "挂件 id 必须是正整数，或 clear 摘掉"); return; }
+
+        var c = lo.Charm ?? new Charm();
+        c.Id = id;
+        if (info.ArgCount >= 3 && int.TryParse(info.GetArg(2), out int pos)) c.Pos = pos;
+        if (info.ArgCount >= 4 && int.TryParse(info.GetArg(3), out int seed)) c.Seed = seed;
+        lo.Charm = c;
+        BumpItemId(lo);
+        SaveCfg(player!); ReapplyHeld(player!, w, pawn, isKnife);
+
+        var item2 = w.AttributeManager?.Item;
+        int posCount = item2 != null && _charmPlacements.TryGetValue(item2.ItemDefinitionIndex, out var pl) ? pl.Count : 0;
+        string posHint = posCount > 0 ? $"，这把武器有 {posCount} 个预设位置（0-{posCount - 1}）" : "，无位置表，用游戏默认挂点";
+        Reply(player!, $"挂件 id={id} 已挂上（重进地图后显示）{posHint}");
+    }
+
     private void CmdKnife(CCSPlayerController? player, CommandInfo info)
     {
         if (!IsRealPlayer(player)) return;
@@ -766,6 +845,106 @@ public class PlayerSkinsPlugin : BasePlugin
         Reply(player!, "已清空你的全部皮肤设置（下回合或重连生效）");
     }
 
+    // ---------------- 职业选手预设 ----------------
+
+    private void CmdPro(CCSPlayerController? player, CommandInfo info)
+    {
+        if (!IsRealPlayer(player)) return;
+        if (_pros.Count == 0) { Reply(player!, "选手预设未加载（缺 pro_loadouts.json）"); return; }
+
+        if (info.ArgCount < 2 || info.GetArg(1).ToLowerInvariant() is "list" or "列表")
+        {
+            Reply(player!, $"共 {_pros.Count} 名选手预设，!pro <名字> 一键切换（支持模糊搜索）。热门：");
+            foreach (var p in _pros.Take(8))
+                player!.PrintToChat($" \x06{p.Names.FirstOrDefault()}\x01  {p.Title}");
+            return;
+        }
+
+        // 先精确匹配名字/别名；不中再按名字+称号模糊搜，唯一命中就直接换，多个就列出来
+        var key = info.GetArg(1).ToLowerInvariant();
+        var pro = _pros.FirstOrDefault(p => p.Names.Any(n => n.ToLowerInvariant() == key));
+        if (pro == null)
+        {
+            var fuzzy = _pros.Where(p =>
+                p.Names.Any(n => n.ToLowerInvariant().Contains(key))
+                || (p.Title ?? "").ToLowerInvariant().Contains(key)).ToList();
+            if (fuzzy.Count == 1) pro = fuzzy[0];
+            else if (fuzzy.Count > 1)
+            {
+                Reply(player!, $"「{info.GetArg(1)}」匹配到 {fuzzy.Count} 个，想要哪个：");
+                foreach (var p in fuzzy.Take(10))
+                    player!.PrintToChat($" \x06{p.Names.FirstOrDefault()}\x01  {p.Title}");
+                return;
+            }
+        }
+        if (pro == null) { Reply(player!, $"没有「{info.GetArg(1)}」的预设，!pro 看热门列表，或换个关键词模糊搜"); return; }
+
+        // 第一次用 !pro 时把玩家自己的配置备份一份，之后连续换选手不覆盖备份，!unpro 随时能回来
+        try
+        {
+            SaveCfg(player!);
+            var backup = BackupCfgPathFor(player!.SteamID);
+            if (!File.Exists(backup)) File.Copy(CfgPathFor(player.SteamID), backup);
+        }
+        catch (Exception ex) { Logger.LogError("[PlayerSkins] 备份玩家配置失败: " + ex.Message); }
+
+        // 预设优先、自己的兜底：选手数据里没有的枪（典型：M4 二选一的另一把），保留玩家自己的皮肤。
+        // “自己的”一律从备份读——连续 !pro 换人时当前配置是上一个选手的，不是玩家自己的。
+        var merged = CloneConfig(pro.Config);
+        int kept = 0;
+        try
+        {
+            var backupPath = BackupCfgPathFor(player.SteamID);
+            var own = File.Exists(backupPath)
+                ? JsonSerializer.Deserialize<SkinConfig>(File.ReadAllText(backupPath))
+                : null;
+            if (own != null)
+            {
+                foreach (var kv in own.Guns)
+                    if (!merged.Guns.ContainsKey(kv.Key)) { merged.Guns[kv.Key] = kv.Value; kept++; }
+                if (merged.KnifeDef == 0 && own.KnifeDef != 0) { merged.KnifeDef = own.KnifeDef; merged.Knife = own.Knife; kept++; }
+                if (merged.GloveDef == 0 && own.GloveDef != 0) { merged.GloveDef = own.GloveDef; merged.Gloves = own.Gloves; kept++; }
+            }
+        }
+        catch (Exception ex) { Logger.LogError("[PlayerSkins] 合并玩家自己的配置失败: " + ex.Message); }
+
+        _cfgs[player!.SteamID] = merged;
+        SaveCfg(player);
+        var pawn = player.PlayerPawn?.Value;
+        if (pawn != null && pawn.IsValid) ApplyAll(player, pawn);
+        Reply(player, $"已切换为 {pro.Names.FirstOrDefault()} 的库存：{pro.Title}"
+            + (kept > 0 ? $"（他没配的 {kept} 件保留了你自己的）" : ""));
+        Reply(player, "刀要重生一次才换模型；贴纸和挂件要重进地图才显示。!unpro 恢复你自己的配置");
+        // M4 装备库二选一：合并后仍只有一把，说明选手用的那把和玩家自己的都不覆盖另一把，提前说清楚
+        bool hasA4 = merged.Guns.ContainsKey(16), hasA1 = merged.Guns.ContainsKey(60);
+        if (hasA4 ^ hasA1)
+            Reply(player, hasA4
+                ? "这位选手用 M4A4：装备库里选 M4A4 才有 M4 皮肤（M4A1-S 你俩都没配）"
+                : "这位选手用 M4A1-S：装备库里选 M4A1-S 才有 M4 皮肤（M4A4 你俩都没配）");
+    }
+
+    private void CmdUnpro(CCSPlayerController? player, CommandInfo info)
+    {
+        if (!IsRealPlayer(player)) return;
+        var backup = BackupCfgPathFor(player!.SteamID);
+        if (!File.Exists(backup)) { Reply(player, "没有你的备份（还没用过 !pro）"); return; }
+        try
+        {
+            File.Copy(backup, CfgPathFor(player.SteamID), true);
+            File.Delete(backup);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("[PlayerSkins] 恢复玩家配置失败: " + ex.Message);
+            Reply(player, "恢复失败，看服务器日志");
+            return;
+        }
+        _cfgs[player.SteamID] = LoadPlayerConfig(player.SteamID);
+        var pawn = player.PlayerPawn?.Value;
+        if (pawn != null && pawn.IsValid) ApplyAll(player, pawn);
+        Reply(player, "已恢复你自己的配置（刀重生生效，贴纸/挂件重进地图生效）");
+    }
+
     // ---------------- 搜索 ----------------
 
     private void CmdSkinSearch(CCSPlayerController? player, CommandInfo info)
@@ -792,6 +971,19 @@ public class PlayerSkinsPlugin : BasePlugin
         Reply(player!, $"贴纸 {hits.Count} 个：");
         foreach (var e in hits) player!.PrintToChat($" \x06{e.i}\x01  {e.cn}");
         Reply(player!, "手持武器后 !sticker <槽0-4> <id>");
+    }
+
+    private void CmdCharmSearch(CCSPlayerController? player, CommandInfo info)
+    {
+        if (!IsRealPlayer(player)) return;
+        if (info.ArgCount < 2) { Reply(player!, "用法: !cs <关键词>，如 !cs AK / !cs 小"); return; }
+        if (_charms.Count == 0) { Reply(player!, "挂件库未加载（缺 charms_db.json）"); return; }
+        var keys = ArgsToKeys(info);
+        var hits = _charms.Where(e => keys.All(k => ((e.cn ?? "") + " " + (e.en ?? "")).ToLowerInvariant().Contains(k))).Take(10).ToList();
+        if (hits.Count == 0) { Reply(player!, "没找到，换个关键词"); return; }
+        Reply(player!, $"挂件 {hits.Count} 个：");
+        foreach (var e in hits) player!.PrintToChat($" \x06{e.i}\x01  {e.cn} | {e.en}");
+        Reply(player!, "手持武器后 !charm <id>");
     }
 
     private static List<string> ArgsToKeys(CommandInfo info)
@@ -837,10 +1029,66 @@ public class PlayerSkinsPlugin : BasePlugin
         static int ReadInt(JsonElement e) => e.ValueKind == JsonValueKind.Number ? e.GetInt32() : (int.TryParse(e.GetString(), out var r) ? r : 0);
     }
 
+    // 挂件位置表不随本插件分发（数据取自 AGPL 的 CS2-Bot-Improver，本仓库 MIT）。
+    // 优先读本插件目录下用户自放的 charm_placements.json，否则借用旁边 BotRandomizer 的那份。
+    private void LoadCharmPlacements()
+    {
+        _charmPlacements.Clear();
+        var candidates = new[]
+        {
+            Path.Combine(ModuleDirectory, "charm_placements.json"),
+            Path.Combine(ModuleDirectory, "..", "BotRandomizer", "charm_placements.json"),
+        };
+        var path = candidates.FirstOrDefault(File.Exists);
+        if (path == null)
+        {
+            Logger.LogWarning("[PlayerSkins] 未找到 charm_placements.json（本插件目录或 BotRandomizer 目录），挂件将使用游戏默认挂点");
+            return;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (!ushort.TryParse(prop.Name, out var def) || prop.Value.ValueKind != JsonValueKind.Array) continue;
+                var list = new List<float[]>();
+                foreach (var posEl in prop.Value.EnumerateArray())
+                {
+                    if (posEl.ValueKind != JsonValueKind.Array || posEl.GetArrayLength() != 3) continue;
+                    var xyz = new float[3];
+                    int i = 0;
+                    foreach (var v in posEl.EnumerateArray()) xyz[i++] = v.GetSingle();
+                    list.Add(xyz);
+                }
+                if (list.Count > 0) _charmPlacements[def] = list;
+            }
+            Logger.LogInformation($"[PlayerSkins] 挂件位置表已加载：{_charmPlacements.Count} 种武器（{Path.GetFileName(Path.GetDirectoryName(path))}）");
+        }
+        catch (Exception ex) { Logger.LogError("[PlayerSkins] 读取挂件位置表失败: " + ex.Message); }
+    }
+
     // ---------------- 数据结构 ----------------
 
     private class SkinEntry { public int p { get; set; } public string? w { get; set; } public string? en { get; set; } public string? cn { get; set; } }
     private class StickerEntry { public int i { get; set; } public string? en { get; set; } public string? cn { get; set; } }
+    private class CharmEntry { public int i { get; set; } public string? en { get; set; } public string? cn { get; set; } }
+
+    private class ProEntry
+    {
+        public List<string> Names { get; set; } = new();
+        public string? Title { get; set; }
+        public SkinConfig Config { get; set; } = new();
+    }
+
+    private class Charm
+    {
+        public int Id { get; set; }
+        public int Seed { get; set; } = 0;
+        public int Pos { get; set; } = 0;     // 位置表里的序号
+        public float? X { get; set; }          // 三个都给了就用显式坐标，否则查位置表
+        public float? Y { get; set; }
+        public float? Z { get; set; }
+    }
 
     private class Sticker
     {
@@ -860,6 +1108,7 @@ public class PlayerSkinsPlugin : BasePlugin
         public int StatTrak { get; set; } = -1;      // -1 = 关闭
         public int Quality { get; set; } = -1;        // -1 = 不覆盖
         public Dictionary<int, Sticker> Stickers { get; set; } = new();
+        public Charm? Charm { get; set; }             // null = 不挂
 
         // 这件装备当前用的 ItemID，0 = 还没分配。只存内存，不进 json：
         // 重启后重新分配即可，客户端的材质缓存本来也随之清空。

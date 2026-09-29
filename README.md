@@ -4,7 +4,7 @@
 [![Downloads](https://img.shields.io/github/downloads/ANXSFAN/PlayerSkins/total)](https://github.com/ANXSFAN/PlayerSkins/releases)
 [![License](https://img.shields.io/github/license/ANXSFAN/PlayerSkins)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/ANXSFAN/PlayerSkins?style=flat)](https://github.com/ANXSFAN/PlayerSkins/stargazers)
-[![CounterStrikeSharp](https://img.shields.io/badge/CounterStrikeSharp-1.0.371-blue)](https://github.com/roflmuffin/CounterStrikeSharp)
+[![CounterStrikeSharp](https://img.shields.io/badge/CounterStrikeSharp-1.0.373-blue)](https://github.com/roflmuffin/CounterStrikeSharp)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 
 给 **真人玩家** 上武器 / 刀 / 手套皮肤的 CounterStrikeSharp 插件，用于 **`-insecure` 离线打人机自用**。
@@ -26,8 +26,10 @@
 
 ## 前提条件
 
-目标机需已安装 **CS2-Bot-Improver v1.4.2 或 v1.4.3**（即 Metamod + **CounterStrikeSharp 1.0.371**）。
-本插件在 **CounterStrikeSharp 1.0.371 / net10.0** 上测试通过；CSSharp 版本差太多可能需要重新编译（见下方「从源码编译」）。
+目标机需已安装 **CS2-Bot-Improver v1.4.4**（即 Metamod + **CounterStrikeSharp 1.0.373**）。
+本插件基于 **CounterStrikeSharp 1.0.373 / net10.0** 编译；CSSharp 版本差太多可能需要重新编译（见下方「从源码编译」）。
+
+> ⚠️ **2026-09-23 游戏更新后**：本插件 v1.3.1 已换用新的写皮肤特征码；但**换刀**依赖 CSSharp 核心的 `AcceptInput`，它的特征码在这次更新里失效，需要 **CounterStrikeSharp ≥ 1.0.375**（或把 `addons/counterstrikesharp/gamedata/gamedata.json` 换成 1.0.375 及以上版本的）才能正常换刀。
 
 ---
 
@@ -46,6 +48,8 @@
      ├─ skins_en.json       (legacy 老模型皮肤位置判断)
      ├─ skins_db.json       (!skinsearch 皮肤名称库)
      ├─ stickers_db.json    (!stickersearch 贴纸名称库)
+     ├─ charms_db.json      (!charmsearch 挂件名称库)
+     ├─ pro_loadouts.json   (!pro 职业选手库存预设)
      └─ configs\            (运行时自动生成：每位玩家一份 <SteamID>.json)
    ```
 3. 启动打人机（开图自动加载），或在服务器控制台执行：
@@ -85,6 +89,34 @@
 | `!stickerclear` / `!sc` | 清空手持武器全部贴纸 | |
 | `!stickersearch <关键词>` / `!sss` | 搜贴纸代号（1万+张，中英文） | `!sss 皇冠` / `!sss katowice 2014` |
 
+### 挂件（charm）
+| 指令 | 说明 | 例子 |
+|---|---|---|
+| `!charm <id\|clear> [位置序号] [seed]` | 给手持武器挂/摘挂件（刀不行） | `!charm 7`（嚎哮酱） |
+| `!charmsearch <关键词>` / `!cs` | 搜挂件代号（中英文） | `!cs AK` / `!cs 小` |
+
+> 挂件和贴纸一样，**重进地图后才显示**。
+> **挂件位置**：插件会自动借用旁边 `BotRandomizer/charm_placements.json` 的位置表（装了 CS2-Bot-Improver v1.4.3+ 就有），`[位置序号]` 在该武器的预设位置间切换；没有位置表则用游戏默认挂点。也可以把一份 `charm_placements.json` 直接放进本插件目录。
+
+### 职业选手库存一键切换
+| 指令 | 说明 | 例子 |
+|---|---|---|
+| `!pro` | 看热门选手 + 用法 | |
+| `!pro <选手名>` | 一键切换成该选手的全套库存（刀+手套+枪皮+签名贴纸+挂件），支持模糊搜索 | `!pro s1mple` / `!pro 载物` / `!pro navi` |
+| `!unpro` | 恢复你自己之前的配置 | |
+
+内置 **150 名现役职业选手**（s1mple / ZywOo / m0NESY / NiKo / donk / device / XANTARES……）：
+
+- **枪皮 / 刀 / 手套**：来自 [csskins.wiki](https://csskins.wiki/loadout/player) 收录的选手常用配置；
+- **贴纸**：自动匹配该选手的大赛签名贴纸 ×4（金色冠军版 > 金色 > 普通，取最新一届）；
+- **挂件**：无公开数据源，为人工风格搭配（仅部分热门选手配了）。
+
+第一次 `!pro` 会自动备份你自己的配置，连续切换不同选手不会覆盖备份，`!unpro` 随时还原。
+
+**预设优先、自己的兜底**：选手数据里没有的枪会保留你自己原来的皮肤（典型场景：M4A4 / M4A1-S 装备库二选一，选手数据只有他用的那把——比如 s1mple 只有 M4A4 嚎叫，你拿 M4A1-S 时就还显示你自己的皮肤）。若某把枪两边都没配，`!pro` 会在聊天里提示。
+
+**数据库更新 / 自定义**：`pro_loadouts.json` 由 `tools/gen_pro_loadouts.py` 生成——联网跑一遍即可重刷全量数据（转会期、出新签名后跑）。中文别名、称号、多普勒相位、指定贴纸、挂件搭配都写在 `tools/pro_overrides.json` 里人工维护，重新生成不会丢。也可以直接手编 `pro_loadouts.json` 加自定义预设（`Config` 结构与 `configs/<SteamID>.json` 相同）。
+
 > ⚠️ **贴纸的显示时机**：贴纸只在武器模型「完整重建」时才渲染，因此 `!sticker` 后需要 **重进地图**（`map de_dust2` 等，或换图）才会显示——普通重生不刷新。皮肤 / 种子 / StatTrak / 品质这些则重生即生效。
 
 > ⚠️ **换刀须知**：
@@ -114,17 +146,17 @@
 
 ## 从源码编译（开发者 / 需要适配其它 CSSharp 版本时）
 
-需要 **.NET 10 SDK**（CounterStrikeSharp 1.0.371 目标框架为 net10.0）。
+需要 **.NET 10 SDK**（CounterStrikeSharp 1.0.373 目标框架为 net10.0）。
 
 ```bash
 cd src
 dotnet build -c Release
 ```
 
-编译产物在 `src/bin/Release/net10.0/`，其中 `PlayerSkins.dll` + `PlayerSkins.deps.json` + `skins_en.json` + `skins_db.json` 就是要放进 `plugins/PlayerSkins/` 的全部文件。
+编译产物在 `src/bin/Release/net10.0/`，其中 `PlayerSkins.dll` + `PlayerSkins.deps.json` 加上 5 个 json 数据文件（`skins_en` / `skins_db` / `stickers_db` / `charms_db` / `pro_loadouts`）就是要放进 `plugins/PlayerSkins/` 的全部文件。
 
 - CSSharp 版本在 `src/PlayerSkins.csproj` 的 `PackageReference` 里改。
-- 若某次 CS2 更新后皮肤不显示，多半是 CSSharp 核心 gamedata 偏移失效 —— 升级到修复了该版本的 CounterStrikeSharp 并重新编译即可（本插件写皮肤用的内存特征码取自 BotRandomizer，随其更新）。
+- 若某次 CS2 更新后皮肤不显示，多半是 CSSharp 核心 gamedata 偏移失效 —— 升级到修复了该版本的 CounterStrikeSharp 并重新编译即可（本插件写皮肤用的内存特征码在 `src/PlayerSkins.cs` 里；游戏大更新后若失配，可参考 [ModSharp 的 gamedata](https://github.com/Kxnrl/modsharp-public/blob/main/.asset/gamedata/server.games.jsonc) 里 `CAttributeList::SetOrAddAttributeValueByName` 的最新特征码）。
 
 ### 刷新皮肤名称库（`skins_db.json`）
 
@@ -134,9 +166,10 @@ dotnet build -c Release
 
 ## 致谢
 
-- 写皮肤的底层实现思路参考自 [ed0ard/CS2-Bot-Improver](https://github.com/ed0ard/CS2-Bot-Improver) 的 `BotRandomizer`。
+- 写皮肤的底层实现思路参考自 [ed0ard/CS2-Bot-Improver](https://github.com/ed0ard/CS2-Bot-Improver) 的 `BotRandomizer`；挂件（keychain）属性写法与其 v1.3.0 对齐，挂件位置表在运行时借用其 `charm_placements.json`（AGPL 数据，不随本仓库分发）。
+- 2026-09-23 游戏更新后的写皮肤特征码参考自 [Kxnrl/modsharp-public](https://github.com/Kxnrl/modsharp-public) 的 gamedata。
 - 贴纸 / StatTrak 的属性写法（`ViewAsFloat` 位重解释、`sticker slot N ...` 属性）参考自 [Nereziel/cs2-WeaponPaints](https://github.com/Nereziel/cs2-WeaponPaints)。
-- 皮肤 / 贴纸名称与 paint_index 数据来自 [ByMykel/CSGO-API](https://github.com/ByMykel/CSGO-API)。
+- 皮肤 / 贴纸 / 挂件名称与 paint_index 数据来自 [ByMykel/CSGO-API](https://github.com/ByMykel/CSGO-API)；选手枪皮参考 [csskins.wiki](https://csskins.wiki/loadout/player)。
 - 基于 [roflmuffin/CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) 开发。
 
 ## 许可证

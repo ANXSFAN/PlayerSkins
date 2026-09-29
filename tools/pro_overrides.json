@@ -1,0 +1,33 @@
+{
+  "//": "人工维护的覆盖数据，重跑生成脚本不会丢。priority = !pro 列表靠前的顺序；players 按 csskins.wiki 的 slug 索引。",
+  "//fields": "aliases=额外可输入的名字(如中文) | title=展示称号 | knife_phase=多普勒相位(Phase 1-4/Ruby/Sapphire/Emerald/Black Pearl) | knife_seed=刀种子 | sticker=强制指定签名贴纸id | charms={武器defindex: 挂件id}（挂件没有公开数据源，纯手工搭配） | extra_guns={defindex: {Paint:..}} 给选手数据里没有的武器补皮肤（如只用 M4A4 的选手补一把 M4A1-S，属搭配非本人配置；签名贴纸会自动加）",
+  "priority": ["s1mple", "zywoo", "m0nesy", "niko", "donk", "device", "electronic", "b1t", "frozen", "elige", "fallen", "brollan", "ropz", "jl", "sh1ro"],
+  "players": {
+    "s1mple": {
+      "aliases": ["西蒙"],
+      "title": "s1mple — 乌克兰狙神（NAVI 传奇）",
+      "sticker": 5131,
+      "charms": { "7": 18, "9": 20 }
+    },
+    "zywoo": {
+      "aliases": ["载物"],
+      "title": "ZywOo — 法国狙神（Vitality）",
+      "charms": { "7": 30, "9": 19 }
+    },
+    "m0nesy": {
+      "aliases": ["monesy"],
+      "title": "m0NESY — 天才少年狙手（Falcons）",
+      "knife_phase": "Emerald",
+      "charms": { "7": 17, "9": 29 }
+    },
+    "niko": {
+      "title": "NiKo — 波黑步枪之神（Falcons）",
+      "charms": { "7": 61, "60": 28 }
+    },
+    "donk": {
+      "aliases": ["东克"],
+      "title": "donk — 俄罗斯天才突破手（Team Spirit）",
+      "charms": { "7": 7, "60": 64 }
+    }
+  }
+}

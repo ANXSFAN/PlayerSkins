@@ -13,9 +13,9 @@
   </PropertyGroup>
 
   <!-- CounterStrikeSharp API：从 NuGet 还原。版本需与你服务器上的 CSSharp 对应。
-       本插件在 CounterStrikeSharp 1.0.371 (CS2-Bot-Improver v1.4.2) 上测试通过。 -->
+       本插件基于 CounterStrikeSharp 1.0.373 (CS2-Bot-Improver v1.4.4) 编译。 -->
   <ItemGroup>
-    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.371" />
+    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.373" />
   </ItemGroup>
 
   <!-- 皮肤数据文件：编译时自动拷到输出目录，随 dll 一起分发 -->
@@ -23,6 +23,8 @@
     <Content Include="..\data\skins_en.json" Link="skins_en.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\data\skins_db.json" Link="skins_db.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\data\stickers_db.json" Link="stickers_db.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\data\charms_db.json" Link="charms_db.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\data\pro_loadouts.json" Link="pro_loadouts.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
