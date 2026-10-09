@@ -4,7 +4,7 @@
 [![Downloads](https://img.shields.io/github/downloads/ANXSFAN/PlayerSkins/total)](https://github.com/ANXSFAN/PlayerSkins/releases)
 [![License](https://img.shields.io/github/license/ANXSFAN/PlayerSkins)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/ANXSFAN/PlayerSkins?style=flat)](https://github.com/ANXSFAN/PlayerSkins/stargazers)
-[![CounterStrikeSharp](https://img.shields.io/badge/CounterStrikeSharp-1.0.373-blue)](https://github.com/roflmuffin/CounterStrikeSharp)
+[![CounterStrikeSharp](https://img.shields.io/badge/CounterStrikeSharp-1.0.376-blue)](https://github.com/roflmuffin/CounterStrikeSharp)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 
 给 **真人玩家** 上武器 / 刀 / 手套皮肤的 CounterStrikeSharp 插件，用于 **`-insecure` 离线打人机自用**。
@@ -26,10 +26,10 @@
 
 ## 前提条件
 
-目标机需已安装 **CS2-Bot-Improver v1.4.4**（即 Metamod + **CounterStrikeSharp 1.0.373**）。
-本插件基于 **CounterStrikeSharp 1.0.373 / net10.0** 编译；CSSharp 版本差太多可能需要重新编译（见下方「从源码编译」）。
+目标机需已安装 **CS2-Bot-Improver v1.4.5**（即 Metamod + **CounterStrikeSharp 1.0.376**）。
+本插件基于 **CounterStrikeSharp 1.0.376 / net10.0** 编译；CSSharp 版本差太多可能需要重新编译（见下方「从源码编译」）。
 
-> ⚠️ **2026-09-23 游戏更新后**：本插件 v1.3.1 已换用新的写皮肤特征码；但**换刀**依赖 CSSharp 核心的 `AcceptInput`，它的特征码在这次更新里失效，需要 **CounterStrikeSharp ≥ 1.0.375**（或把 `addons/counterstrikesharp/gamedata/gamedata.json` 换成 1.0.375 及以上版本的）才能正常换刀。
+> ⚠️ **2026-09-23 游戏更新后，本插件 v1.2.5 及更早的版本已失效**（写皮肤的特征码失配，皮肤 / 贴纸 / 挂件都不生效）。请更新到 **v1.3.1 及以上**，并把 CS2-Bot-Improver 更新到 **v1.4.5**——换刀依赖 CSSharp 核心的 `AcceptInput`，它在这次游戏更新里也失效了，v1.4.5 自带的 CounterStrikeSharp 1.0.376 已修复。
 
 ---
 
@@ -146,7 +146,7 @@
 
 ## 从源码编译（开发者 / 需要适配其它 CSSharp 版本时）
 
-需要 **.NET 10 SDK**（CounterStrikeSharp 1.0.373 目标框架为 net10.0）。
+需要 **.NET 10 SDK**（CounterStrikeSharp 1.0.376 目标框架为 net10.0）。
 
 ```bash
 cd src

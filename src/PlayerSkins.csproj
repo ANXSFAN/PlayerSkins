@@ -13,9 +13,9 @@
   </PropertyGroup>
 
   <!-- CounterStrikeSharp API：从 NuGet 还原。版本需与你服务器上的 CSSharp 对应。
-       本插件基于 CounterStrikeSharp 1.0.373 (CS2-Bot-Improver v1.4.4) 编译。 -->
+       本插件基于 CounterStrikeSharp 1.0.376 (CS2-Bot-Improver v1.4.5) 编译。 -->
   <ItemGroup>
-    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.373" />
+    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.376" />
   </ItemGroup>
 
   <!-- 皮肤数据文件：编译时自动拷到输出目录，随 dll 一起分发 -->
